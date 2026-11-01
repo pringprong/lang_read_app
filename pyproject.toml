@@ -25,5 +25,12 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+langread = [
+    "db/schema.sql",
+    "resources/prompts/*.json",
+    "resources/hsk/*.csv",
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -118,4 +118,17 @@ Environment notes:
 
 ## M10 — Deployment
 
-- [ ] (pending)
+- [x] `pytest` passes: 165 total (final).
+- [x] Package data declared in `pyproject.toml` (schema.sql, prompt templates, HSK CSV) so installs and PyInstaller bundles carry all resources.
+- [x] `--smoke-test` app flag: boots the window, applies the schema, seeds templates, imports HSK, exits 0 — used to verify packaged builds on any OS.
+- [x] **Linux PyInstaller build verified**: `scripts/build_desktop.sh` → `dist/LangRead/`; packaged binary smoke test passed twice (first run: schema + 7 templates + 4,991 HSK words; second run idempotent, exit 0). Qt Multimedia + FFmpeg plugins confirmed bundled (audio playback works).
+- [x] README rewritten: quick start, mirror notes, first-use walkthrough, data/backups, packaging instructions for **Linux and Windows**, testing, project status.
+- [x] Package size ~440 MB (PySide6 + FFmpeg) — acceptable for a local install.
+- [ ] **User production smoke test** (real models): configure LM Studio + Kokoro endpoints, run one lesson through create → generate → save → review.
+- [ ] **Windows build**: run the README's PowerShell commands on a Windows machine (same source tree, no code changes expected).
+
+## Verdict
+
+Desktop app (M0–M10) is **feature-complete per the plan's Definition of Done**,
+pending the two user-side checks above. Android implementation (roadmap step 6)
+can begin after production use begins.

@@ -362,8 +362,8 @@ Planned providers (D-4):
 1. Finalize this requirements document with answers to the Open Questions. ✅ done (v1.1)
 2. Detailed plan for the **desktop app** (language choice, backend, frontend). ✅ approved
 3. Rough plan for the **Android app**. ✅ drafted — see `20261101_android_app_plan.md` (Flutter recommended; pending user approval)
-4. Implement the desktop app. ← current step
-5. Deploy, test, and use the desktop app in production.
+4. Implement the desktop app. ✅ M0–M10 complete (165 tests; Linux PyInstaller build verified)
+5. Deploy, test, and use the desktop app in production. ← current step (user: real-model smoke test + Windows build)
 6. Implement the Android app (only after the desktop app is fully functional).
 
 
