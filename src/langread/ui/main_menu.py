@@ -96,6 +96,10 @@ class MainMenu(QMainWindow):
             self._create_topic()
         elif index == 2:
             self._create_lesson()
+        elif index == 7:
+            from langread.ui.sync_page import SyncPage
+
+            SyncPage(self.conn(), db_path=db_path(), parent=self).exec()
         else:
             self._not_implemented()
 

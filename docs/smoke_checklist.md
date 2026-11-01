@@ -108,4 +108,14 @@ Environment notes:
 
 ## M9 — Sync
 
+- [x] `pytest` passes: 165 total (9 new — export, verification, incremental events, results import, most-recent-wins, corrupt rejection).
+- [x] `services/sync.py`: **content bundle** (desktop → Android) — `sync-v1.zip` with `manifest.json` (schema version, counts, **SHA-256 of every file**), `content.json` (topics, lessons, sentences with segmentation, words with SRS state, lesson_words, hsk_words), `audio/lesson_<id>.mp3`, and `events.jsonl` (review events **since the last export**).
+- [x] `verify_bundle`: re-verifies every checksum; rejects tampered files, missing manifests, bad zips, wrong schema versions, and wrong bundle types.
+- [x] **Results import** (Android → desktop): verify **before** anything is applied → automatic DB backup (`backups/pre-import-<ts>.db`) → insert `device='android'` events → apply SRS ratings with the **most-recent-wins** conflict rule (§10) → update `last_reviewed_at` → apply word actions (add_new / add_basic / basic_to_new).
+- [x] `write_results_bundle`: reference implementation of the results-bundle format (spec for the Android app).
+- [x] Sync page UI (main menu "Sync with Android"): export with destination picker + summary, import with verification summary; both run in background workers with per-thread DB connections.
+- [ ] Real round-trip with the Android app — by definition deferred to the Android implementation (roadmap step 6).
+
+## M10 — Deployment
+
 - [ ] (pending)

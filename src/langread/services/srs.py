@@ -231,3 +231,13 @@ class SrsService:
         state = apply_rating(self._state_of(word), rating, self.params(), now)
         return self._write(word_id, state)
 
+    def apply_rating_at(self, word_id: int, rating: str, reviewed_at: str) -> Word:
+        """Apply an SRS rating for a given timestamp WITHOUT logging an event
+        (used by sync reconciliation — the event is inserted separately)."""
+        if rating not in RATINGS:
+            raise ValueError(f"invalid rating: {rating!r}")
+        word = self.words.get(word_id)
+        assert word is not None
+        state = apply_rating(self._state_of(word), rating, self.params(), reviewed_at)
+        return self._write(word_id, state)
+
