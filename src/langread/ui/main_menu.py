@@ -80,6 +80,10 @@ class MainMenu(QMainWindow):
             self._open_settings(initial_tab=0)
         elif index == 6:
             self._open_settings(initial_tab=2)
+        elif index == 0:
+            from langread.ui.topic_lesson_list import LessonListDialog
+
+            LessonListDialog(self.conn(), parent=self).exec()
         elif index == 3:
             from langread.ui.words.add_words import AddWordsDialog
 

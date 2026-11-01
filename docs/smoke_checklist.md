@@ -98,4 +98,14 @@ Environment notes:
 
 ## M8 — Review UI
 
+- [x] `pytest` passes: 156 total (7 new — lesson list, text rendering, popups, translations toggle, complete/cancel, bulk rating, jump-to-end).
+- [x] Topic/lesson list (§8.1): topic dropdown, lessons in order with status + "last reviewed / never reviewed" + paragraph counts; double-click to review; "Finish saving" resumes incomplete lessons (M7 `FinalizeWorker`, background thread).
+- [x] Lesson review text (§8.2–8.4): every CJK token is a clickable anchor; **static first-occurrence highlighting** of new words (D-1); word popups show pinyin/definition/list status with add-to-new/basic and basic→new actions committed immediately (§8.3, §5.3); per-sentence [译] translation toggles; percent-encoding-safe anchor handling.
+- [x] Audio bar (§8.5): QMediaPlayer (FFmpeg backend confirmed working on this laptop) — play/pause, restart, 0.5×–2× speed, ±15s, "jump to end" → word review; graceful degradation if audio is missing.
+- [x] Word review (§8.6): this lesson's learned words with 4-way ratings (standard default), multi-select + select-all + bulk apply.
+- [x] Completion (§8.7): writes review events then applies SRS ratings, sets `last_reviewed_at`, offers next-lesson; **cancel writes nothing** (word-list actions taken during review remain, as specified).
+- [x] Main-menu "Review a lesson" opens the topic/lesson list.
+
+## M9 — Sync
+
 - [ ] (pending)

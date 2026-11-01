@@ -103,6 +103,48 @@ class SaveWorker(QThread):
 
 
 
+class FinalizeWorker(QThread):
+    """Resumes an interrupted lesson save (§7.9 resume) in a background thread."""
+
+    done = Signal(int)   # lesson id
+    failed = Signal(str)
+
+    def __init__(self, db_path, lesson_id: int, parent=None) -> None:
+        super().__init__(parent)
+        self._db_path = db_path
+        self._lesson_id = lesson_id
+
+    def run(self) -> None:
+        from langread.db.repositories import SettingsRepo
+        from langread.services.lesson_saver import LessonSaver, SaveError
+        from langread.services.llm_client import LlmClient
+        from langread.services.model_settings import (
+            ModelSettings,
+            ModelSettingsError,
+        )
+        from langread.services.translation import TranslationService
+        from langread.services.tts import TtsService
+
+        conn = connect(self._db_path)
+        try:
+            settings = ModelSettings(SettingsRepo(conn))
+            tts = TtsService(settings.tts_config())
+            try:
+                translation = TranslationService(
+                    conn, LlmClient(settings.llm_config("trans"))
+                )
+            except ModelSettingsError:
+                translation = None
+            saver = LessonSaver(conn, tts=tts, translation=translation)
+            lesson = saver.finalize_lesson(self._lesson_id)
+        except Exception as exc:  # noqa: BLE001 - forwarded to the UI
+            self.failed.emit(str(exc))
+        else:
+            self.done.emit(lesson.id)
+        finally:
+            conn.close()
+
+
 class GeneratePage(QWidget):
     generation_finished = Signal(object)  # LessonDraft
     generation_failed = Signal(str)
