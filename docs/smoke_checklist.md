@@ -45,4 +45,15 @@ Environment notes:
 
 ## M3 — Model layer
 
+- [x] `pytest` passes: 78 total (25 new — LLM/TTS clients vs fake server, model settings, JSON extraction, settings UI pages).
+- [x] `LlmClient`: OpenAI-compatible chat with defensive JSON extraction (direct / fenced / embedded) + one fix-up retry; network errors wrapped as `LlmError`.
+- [x] `TtsService`: `/audio/speech` → MP3 bytes with header validation; `synthesize_to_file`.
+- [x] `ModelSettings`: gen/trans/tts settings keys, typed `LlmConfig`/`TtsConfig`, helpful errors when unconfigured, `test_llm`/`test_tts` connection checks.
+- [x] Settings dialog with 3 tabs: Models (3 endpoint groups + async Test buttons), Prompt templates (editor + placeholder hints + save), Spaced repetition (all 11 parameters).
+- [x] Main menu: "Model settings" and "SRS settings" buttons open the dialog on the right tab; DB connection opened lazily and closed on exit.
+- [x] Fake OpenAI-compatible test server (threaded HTTP) drives client integration tests.
+- [ ] **User smoke test (real endpoints):** configure LM Studio + Kokoro URLs in the app's Model settings and press "Test connection" on each — deferred until those services are reachable from this laptop.
+
+## M4 — Segmentation
+
 - [ ] (pending)
