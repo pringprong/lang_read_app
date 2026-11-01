@@ -88,8 +88,74 @@ class MainMenu(QMainWindow):
             from langread.ui.words.list_manager import WordListManager
 
             WordListManager(self.conn(), parent=self).exec()
+        elif index == 1:
+            self._create_topic()
+        elif index == 2:
+            self._create_lesson()
         else:
             self._not_implemented()
+
+    # ---- topic / lesson creation (§7.1) ----
+
+    def _create_topic(self) -> None:
+        import sqlite3
+
+        from PySide6.QtWidgets import QInputDialog
+
+        from langread.db.repositories import TopicsRepo
+
+        name, ok = QInputDialog.getText(self, "New topic", "Topic name:")
+        if not ok or not name.strip():
+            return
+        try:
+            topic = TopicsRepo(self.conn()).create(name.strip())
+        except sqlite3.IntegrityError:
+            QMessageBox.warning(self, "Duplicate topic", "That topic already exists.")
+            return
+        QMessageBox.information(
+            self, "Topic created",
+            f"Topic “{topic.name}” created. You can now create lessons in it.",
+        )
+
+    def _create_lesson(self) -> None:
+        from PySide6.QtWidgets import QInputDialog
+
+        from langread.db.repositories import TopicsRepo
+        from langread.ui.lesson_create.wizard import LessonWizard
+
+        topics = TopicsRepo(self.conn()).list_all()
+        if not topics:
+            QMessageBox.information(
+                self, "No topics",
+                "Create a topic first (menu option “Create a new topic”).",
+            )
+            return
+        names = [t.name for t in topics]
+        name, ok = QInputDialog.getItem(
+            self, "Create a new lesson", "Topic:", names, 0, False
+        )
+        if not ok:
+            return
+        topic = TopicsRepo(self.conn()).get_by_name(name)
+        if topic is None:
+            return
+        llm = self._generation_llm()
+        wizard = LessonWizard(self.conn(), topic.id, topic.name, llm=llm,
+                              db_path=db_path(), parent=self)
+        wizard.exec()
+
+    def _generation_llm(self):
+        from langread.db.repositories import SettingsRepo
+        from langread.services.llm_client import LlmClient
+        from langread.services.model_settings import (
+            ModelSettings,
+            ModelSettingsError,
+        )
+
+        try:
+            return LlmClient(ModelSettings(SettingsRepo(self.conn())).llm_config("gen"))
+        except ModelSettingsError:
+            return None  # wizard/generation reports the missing configuration
 
     def _open_settings(self, initial_tab: int) -> None:
         from langread.ui.settings_dialog import SettingsDialog

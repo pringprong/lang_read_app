@@ -77,4 +77,14 @@ Environment notes:
 
 ## M6 — Lesson creation
 
+- [x] `pytest` passes: 136 total (20 new — cadence planner, generation pipeline, wizard UI).
+- [x] `services/cadence.py`: pure planner — one first-use new word per paragraph (§6.2), none in the final paragraph, final paragraph uses all new words (§6.4), repeats prefer lowest-usage words (§6.3), review rotation, usage tracking (§7.6). Validation: 5–10 new words, paragraphs > new words (wizard allows up to 12 paragraphs; documented deviation for 9–10-word lessons).
+- [x] `services/generation.py`: paragraph-at-a-time generation (D-12) from editable templates, unknown-placeholder validation, LLM reply cleaning (fences/quotes/labels), sentence splitting, per-sentence segmentation, usage check + ≤2 retries with "MUST contain the word" fix-up (§7.6), progress callback, `LessonDraft` result.
+- [x] Wizard UI (3 steps): word selection with suggestions (D-11/§7.2) + validation; background generation with live progress; final review page with per-paragraph text editing (re-split + re-segment) and per-sentence segmentation merge/split (D-6); "Change words → regenerate all" (§7.8).
+- [x] Topic creation from the main menu; "Create a new lesson" picks a topic, wires the real generation LLM from Model settings (with a clear error when unconfigured).
+- [x] Threading fix: `GenerationWorker` opens its **own SQLite connection** (connections are thread-bound); UI updated via queued signals.
+- [ ] "Approve & save" shows an M7 placeholder — the save pipeline (TTS, translations, promotion, SRS, persistence) is next.
+
+## M7 — Save pipeline
+
 - [ ] (pending)
