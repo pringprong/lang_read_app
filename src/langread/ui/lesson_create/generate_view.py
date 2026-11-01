@@ -50,6 +50,59 @@ class GenerationWorker(QThread):
             conn.close()
 
 
+class SaveWorker(QThread):
+    """Runs the lesson save pipeline (§7.9) in a background thread."""
+
+    progress = Signal(str, int, int)  # stage, current, total
+    done = Signal(int)                # lesson id
+    failed = Signal(str)
+
+    def __init__(self, db_path, draft: LessonDraft, parent=None) -> None:
+        super().__init__(parent)
+        self._db_path = db_path
+        self._draft = draft
+
+    def run(self) -> None:
+        from langread.db.repositories import SettingsRepo
+        from langread.services.lesson_saver import LessonSaver, SaveError
+        from langread.services.llm_client import LlmClient
+        from langread.services.model_settings import (
+            ModelSettings,
+            ModelSettingsError,
+        )
+        from langread.services.translation import TranslationService
+        from langread.services.tts import TtsService
+
+        conn = connect(self._db_path)
+        try:
+            settings = ModelSettings(SettingsRepo(conn))
+            tts = TtsService(settings.tts_config())  # required: raises if unset
+            try:
+                translation = TranslationService(
+                    conn, LlmClient(settings.llm_config("trans"))
+                )
+            except ModelSettingsError:
+                translation = None  # optional: sentences stay untranslated
+            saver = LessonSaver(conn, tts=tts, translation=translation)
+            lesson = saver.save_lesson(
+                self._draft,
+                progress=lambda stage, current, total: self.progress.emit(
+                    stage, current, total
+                ),
+            )
+        except ModelSettingsError as exc:
+            self.failed.emit(str(exc))
+        except SaveError as exc:
+            self.failed.emit(f"Saving failed: {exc}")
+        except Exception as exc:  # noqa: BLE001 - forwarded to the UI
+            self.failed.emit(f"Saving failed: {exc}")
+        else:
+            self.done.emit(lesson.id)
+        finally:
+            conn.close()
+
+
+
 class GeneratePage(QWidget):
     generation_finished = Signal(object)  # LessonDraft
     generation_failed = Signal(str)

@@ -87,4 +87,15 @@ Environment notes:
 
 ## M7 — Save pipeline
 
+- [x] `pytest` passes: 149 total (13 new — translation service, save pipeline, end-to-end wizard save).
+- [x] `services/translation.py`: sentence translation + word pinyin/definition via templates; **pypinyin offline fallback** for pinyin; tolerant of bad JSON (returns None rather than failing).
+- [x] `TtsService.synthesize_texts_to_file`: per-paragraph synthesis (avoids request-size limits) concatenated into the single lesson MP3 (D-1).
+- [x] `services/lesson_saver.py` (§7.9): lesson + sentences + lesson_words creation → translations → word promotion (pinyin/definition + HSK linking + New→Learned with initial SRS) → review-word SRS exposure → audio → complete.
+- [x] **Resumable**: every step idempotent; an interrupted save leaves `status='incomplete'` and `finalize_lesson` completes it without duplicating or re-exposing.
+- [x] TTS is required (clear `SaveError` when unconfigured); translation is optional (sentences stay NULL, words fall back to pypinyin).
+- [x] Wizard "Approve && save" runs `SaveWorker` in a background thread (own DB connection) with stage progress; failure keeps the lesson incomplete with a re-approve hint.
+- [x] End-to-end test: wizard → generation → approve → saved lesson with audio, driven by the fake OpenAI-compatible server for TTS + translation.
+
+## M8 — Review UI
+
 - [ ] (pending)

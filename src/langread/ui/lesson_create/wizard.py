@@ -72,6 +72,11 @@ class LessonWizard(QDialog):
 
         self.generate_page.generation_finished.connect(self._on_generation_done)
         self.generate_page.generation_failed.connect(self._on_generation_failed)
+        self._save_worker = None
+        self._saved_lesson_id: int | None = None
+
+    def saved_lesson_id(self) -> int | None:
+        return self._saved_lesson_id
 
     # ---- navigation ----
 
@@ -127,14 +132,44 @@ class LessonWizard(QDialog):
         self.next_button.setEnabled(True)
         QMessageBox.warning(self, "Generation failed", message)
 
-    # ---- approval (save pipeline is M7) ----
+    # ---- approval: run the save pipeline (§7.9) ----
 
     def _approve(self) -> None:
-        if self._draft is None:
+        if self._draft is None or self._save_worker is not None:
             return
+        self.approve_button.setEnabled(False)
+        self.step_label.setText("Saving lesson — audio, translations, word lists…")
+        from langread.ui.lesson_create.generate_view import SaveWorker
+
+        self._save_worker = SaveWorker(self._db_path, self._draft, parent=self)
+        self._save_worker.progress.connect(self._on_save_progress)
+        self._save_worker.done.connect(self._on_save_done)
+        self._save_worker.failed.connect(self._on_save_failed)
+        self._save_worker.start()
+
+    def _on_save_progress(self, stage: str, current: int, total: int) -> None:
+        self.step_label.setText(f"Saving — {stage}: {current}/{total}")
+
+    def _on_save_done(self, lesson_id: int) -> None:
+        self._saved_lesson_id = lesson_id
         QMessageBox.information(
-            self,
-            "Save pipeline not implemented yet",
-            "The save pipeline (TTS audio, translations, word promotion, SRS "
-            "updates) is milestone M7. The lesson draft is complete.",
+            self, "Lesson saved",
+            f"Lesson #{lesson_id} was saved successfully. "
+            "The new words moved to the Learned list.",
         )
+        self.accept()
+
+    def _on_save_failed(self, message: str) -> None:
+        self.approve_button.setEnabled(True)
+        self.step_label.setText("Step 3 of 3 — review and hand-edit")
+        QMessageBox.warning(
+            self,
+            "Saving failed",
+            f"{message}\n\nThe lesson was saved as INCOMPLETE; re-approving "
+            "will finish the remaining steps.",
+        )
+
+    def wait_for_save_worker(self) -> None:
+        """Used by tests: block until the save worker finishes."""
+        if self._save_worker is not None:
+            self._save_worker.wait()

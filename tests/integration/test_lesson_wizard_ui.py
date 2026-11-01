@@ -129,3 +129,52 @@ def test_wizard_full_flow(qapp, conn):
     # regenerate-all returns to step 1 (§7.8)
     wizard._regenerate_all()
     assert wizard.stack.currentIndex() == 0
+
+
+def test_wizard_approve_saves_lesson(qapp, conn, monkeypatch, tmp_path):
+    """End-to-end: generate → hand-edit-free approve → full save pipeline,
+    with all three model endpoints pointed at the fake server."""
+    from pathlib import Path
+
+    from PySide6.QtWidgets import QMessageBox
+
+    from langread.db.repositories import LessonsRepo, SettingsRepo
+    from langread.services.model_settings import ModelSettings
+    from tests.fakes.openai_server import FakeOpenAiServer
+
+    _conn, topic_id, db_file = conn
+    # keep generated audio inside the test sandbox
+    monkeypatch.setenv("LANGREAD_DATA_DIR", str(tmp_path / "appdata"))
+
+    server = FakeOpenAiServer()
+    url = server.start_and_url()
+    try:
+        settings = ModelSettings(SettingsRepo(_conn))
+        settings.save("tts", {"base_url": url, "model": "kokoro"})
+        settings.save("trans", {"base_url": url, "model": "fake"})
+        monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: None)
+
+        wizard = LessonWizard(_conn, topic_id, "Cooking", llm=ScriptedLlm(),
+                              db_path=db_file)
+        for row in range(wizard.word_page.new_list.count()):
+            wizard.word_page.new_list.item(row).setCheckState(Qt.CheckState.Checked)
+        wizard._go_next()
+        wizard.generate_page.wait_for_worker()
+        for _ in range(10):
+            qapp.processEvents()
+        assert wizard.stack.currentIndex() == 2
+
+        wizard._approve()
+        wizard.wait_for_save_worker()
+        for _ in range(10):
+            qapp.processEvents()
+
+        lesson_id = wizard.saved_lesson_id()
+        assert lesson_id is not None
+        lesson = LessonsRepo(_conn).get(lesson_id)
+        assert lesson is not None and lesson.status == "complete"
+        assert lesson.audio_path == f"lesson_{lesson_id}.mp3"
+        audio_file = tmp_path / "appdata" / "audio" / lesson.audio_path
+        assert audio_file.exists() and audio_file.stat().st_size > 0
+    finally:
+        server.stop()

@@ -71,3 +71,14 @@ class TtsService:
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_bytes(data)
         return out_path
+
+    def synthesize_texts_to_file(self, texts: list[str], out_path: Path) -> Path:
+        """Synthesize each text (one call per paragraph, avoiding request-size
+        limits) and concatenate the MP3 frames into a single file (D-1)."""
+        chunks = [self.synthesize(text) for text in texts]
+        data = b"".join(chunks)
+        if not looks_like_mp3(data):
+            raise TtsError("concatenated audio is not valid MP3 data")
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_bytes(data)
+        return out_path
