@@ -56,4 +56,14 @@ Environment notes:
 
 ## M4 — Segmentation
 
+- [x] `pytest` passes: 96 total (18 new — segmentation service + editor widget).
+- [x] jieba with custom dictionary from app word lists + HSK (app words segment atomically, `refresh_dictionary()` after list changes).
+- [x] Tokens resolve to word-list entries (word_id/list_state/pinyin/definition), HSK-only entries, or unresolved.
+- [x] Punctuation separated into its own non-CJK tokens.
+- [x] LLM fallback when a multi-char token is unknown to both the app and jieba's dictionary; fallback result validated (same CJK characters) or rejected; LLM errors fall back to jieba silently.
+- [x] `SegmentationEditor` widget: chips UI, merge selected (contiguous runs), split into characters, reset; `changed` signal.
+- [x] Dependencies added: jieba 0.42.1, pypinyin 0.55.0.
+
+## M5 — Word lists & HSK
+
 - [ ] (pending)

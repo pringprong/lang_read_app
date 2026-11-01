@@ -73,6 +73,13 @@ class HskRepo:
         rows = self.conn.execute(sql, params).fetchall()
         return [self._row_to_hsk(r) for r in rows]
 
+    def list_all(self) -> list[HskWord]:
+        """All HSK words (used to build the segmentation dictionary)."""
+        rows = self.conn.execute(
+            "SELECT * FROM hsk_words ORDER BY level, id"
+        ).fetchall()
+        return [self._row_to_hsk(r) for r in rows]
+
     def find_by_text(self, text: str) -> list[HskWord]:
         rows = self.conn.execute(
             "SELECT * FROM hsk_words WHERE text = ? ORDER BY level", (text,)
