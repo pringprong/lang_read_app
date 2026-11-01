@@ -22,4 +22,17 @@ Environment notes:
 
 ## M1 — Data layer
 
+- [x] `pytest` passes: 31 tests (topics, lessons, sentences, words, HSK, settings, reviews, templates, migrations).
+- [x] Schema applies automatically on first `connect()` (schema_migrations version 1).
+- [x] Topic deletion blocked while non-empty (D-9); duplicate topic names rejected.
+- [x] Lesson → sentences / lesson_words / review_events cascade delete (FK ON DELETE CASCADE).
+- [x] Word `get_or_create` is idempotent — existing list membership wins (§5.1).
+- [x] Moving a word between lists syncs its linked HSK entry's `app_state`.
+- [x] New-word suggestions: topic-associated first, then oldest-added (D-11).
+- [x] Due-word suggestions: same-topic first, then by `due_at` (§7.2).
+- [x] HSK import is idempotent; per-level listing/filtering/pagination works.
+- [x] Prompt templates seeded from bundled JSON; get/upsert round-trips.
+
+## M2 — SRS engine
+
 - [ ] (pending)
