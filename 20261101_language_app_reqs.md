@@ -338,7 +338,7 @@ Planned providers (D-4):
 - **Cross-platform:** desktop runs on Windows and Linux with the same codebase; Android app is a separate codebase sharing the data model.
 - **Data safety:** database and audio files are user-accessible/backupable; sensible failure states for interrupted generation (§7.9, §9.4).
 - **Chinese text specifics:** simplified Chinese only; robust word segmentation stored with sentences (§4.3, D-5); pinyin displayed for words.
-- **Technology constraint (D-8):** use **Python as much as possible** across the project. The desktop app will be pure Python; the Android app's stack will be decided in its planning phase.
+- **Technology constraint (D-8):** use **Python as much as possible** across the project. The desktop app is pure Python; the Android app is planned as **Flutter** (user's prior experience; see `20261101_android_app_plan.md`), since Python is not practical for a touch-first Android UI.
 
 <!-- Section 15 -->
 ## 15. Decisions (v1.1 — all Open Questions resolved 2026-11-01)
@@ -360,9 +360,9 @@ Planned providers (D-4):
 ## 16. Roadmap (agreed sequence)
 
 1. Finalize this requirements document with answers to the Open Questions. ✅ done (v1.1)
-2. Detailed plan for the **desktop app** (language choice, backend, frontend). ✅ draft written — see `20261101_desktop_app_plan.md` (pending user approval)
-3. Rough plan for the **Android app**.
-4. Implement the desktop app.
+2. Detailed plan for the **desktop app** (language choice, backend, frontend). ✅ approved
+3. Rough plan for the **Android app**. ✅ drafted — see `20261101_android_app_plan.md` (Flutter recommended; pending user approval)
+4. Implement the desktop app. ← current step
 5. Deploy, test, and use the desktop app in production.
 6. Implement the Android app (only after the desktop app is fully functional).
 
