@@ -35,4 +35,14 @@ Environment notes:
 
 ## M2 — SRS engine
 
+- [x] `pytest` passes: 53 total (22 new — rating matrix, clamps, chains, exposure, service).
+- [x] Promotion: new → learned with initial interval/ease/due (§7.9.3).
+- [x] Ratings: difficult (relearn 0.5d, ease −0.20, lapses+1), easy (×1.3 bonus, ease +0.15, reps+1), standard (×ease, reps+1), unchanged (identity) — §8.6.
+- [x] Exposure growth (×ease×multiplier, no reps/event) for words merely used in new lessons — §7.9.4.
+- [x] Ease clamped [1.3, 3.0]; growth interval clamped [1, 365] days; relearn step exempt from the min so "difficult" returns sub-day — §8.6.1.
+- [x] Parameters persisted in settings (`srs.params`), unknown keys ignored; in-app editor page comes with the settings UI (M3+).
+- [x] `rate_word` writes the review event *before* updating SRS; exposure writes no event.
+
+## M3 — Model layer
+
 - [ ] (pending)
