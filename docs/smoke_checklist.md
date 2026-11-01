@@ -66,4 +66,15 @@ Environment notes:
 
 ## M5 — Word lists & HSK
 
+- [x] `pytest` passes: 116 total (20 new — HSK service, word import flows, UI flows).
+- [x] **HSK dataset bundled** (D-7): 4,991 words (150/147/298/598/1298/2500 per level, words deduped to their lowest level) from `drkameleon/complete-hsk-vocabulary` (MIT license; old HSK standard, CC-CEDICT definitions), downloaded via jsDelivr/gcore CDNs (raw.githubusercontent is blocked on this network), normalized by `scripts/build_hsk_csv.py` into `resources/hsk/hsk.csv`.
+- [x] HSK auto-imported into the DB on first word-related use (`HskService.import_if_needed`).
+- [x] Paste-import flow (§5.1): parse pasted text → distinct words with status (existing list / HSK level / unknown) → tick new words → marked→New, rest→Basic, existing membership wins; HSK linking + topic association.
+- [x] Manual entry (§5.2), HSK→New/Basic add with pinyin/definition (§5.5), Basic→New and New→Basic moves (§5.4).
+- [x] Word-list manager UI: 4 tabs (New with topic assignment, Learned with SRS info, Basic, HSK browser with level filter, unused-only filter, multi-select bulk add).
+- [x] Bug fixed during M5: HSK import must run **before** the segmentation dictionary loads, otherwise words like 喝咖啡 mis-segment; dictionary version check now per-list counts.
+- [x] Main-menu buttons "Add new words" (3) and "Manage word lists" (4) wired.
+
+## M6 — Lesson creation
+
 - [ ] (pending)

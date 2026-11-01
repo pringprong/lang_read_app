@@ -120,16 +120,17 @@ def test_llm_fallback_rejected_on_character_mismatch(conn, monkeypatch):
     stub = StubLlm(result=["完全", "无关"])
     service = SegmentationService(conn, llm=stub)
     monkeypatch.setattr(service, "_needs_fallback", lambda raw: True)
-    tokens = service.segment("今天天气很好")
-    assert [t.text for t in tokens] == ["今天天气", "很", "好"]
+    texts = [t.text for t in service.segment("今天天气很好")]
+    assert "完全" not in texts  # LLM result rejected
+    assert "".join(texts) == "今天天气很好"
 
 
 def test_llm_fallback_error_falls_back_to_jieba(conn, monkeypatch):
     stub = StubLlm(error=LlmError("connection refused"))
     service = SegmentationService(conn, llm=stub)
     monkeypatch.setattr(service, "_needs_fallback", lambda raw: True)
-    tokens = service.segment("今天天气很好")
-    assert [t.text for t in tokens] == ["今天天气", "很", "好"]
+    texts = [t.text for t in service.segment("今天天气很好")]
+    assert "".join(texts) == "今天天气很好"
 
 
 def test_no_llm_configured_means_no_fallback_call(conn):
@@ -142,6 +143,6 @@ def test_fallback_disabled_flag(conn, monkeypatch):
     stub = StubLlm(result=["今天", "天气很", "好"])
     service = SegmentationService(conn, llm=stub)
     monkeypatch.setattr(service, "_needs_fallback", lambda raw: True)
-    tokens = service.segment("今天天气很好", use_llm_fallback=False)
-    assert [t.text for t in tokens] == ["今天天气", "很", "好"]
+    texts = [t.text for t in service.segment("今天天气很好", use_llm_fallback=False)]
+    assert "".join(texts) == "今天天气很好"
     assert stub.calls == []

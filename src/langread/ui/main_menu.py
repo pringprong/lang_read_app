@@ -80,6 +80,14 @@ class MainMenu(QMainWindow):
             self._open_settings(initial_tab=0)
         elif index == 6:
             self._open_settings(initial_tab=2)
+        elif index == 3:
+            from langread.ui.words.add_words import AddWordsDialog
+
+            AddWordsDialog(self.conn(), parent=self).exec()
+        elif index == 4:
+            from langread.ui.words.list_manager import WordListManager
+
+            WordListManager(self.conn(), parent=self).exec()
         else:
             self._not_implemented()
 

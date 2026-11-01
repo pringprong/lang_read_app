@@ -69,13 +69,21 @@ class SegmentationService:
     # ---- dictionary management ----
 
     def refresh_dictionary(self) -> None:
-        """(Re)load app words and HSK vocabulary into jieba and the maps."""
+        """(Re)load app words and HSK vocabulary into jieba and the maps.
+
+        The version is the per-list word counts + HSK count, so any
+        list-to-list move or addition triggers a refresh.
+        """
         jieba.initialize()
         words: list[Word] = []
+        state_counts: dict[str, int] = {}
         for state in ("new", "learned", "basic"):
-            words.extend(self.words_repo.list_by_state(state))
+            state_words = self.words_repo.list_by_state(state)
+            state_counts[state] = len(state_words)
+            words.extend(state_words)
         hsk_words = self.hsk_repo.list_all()
-        version = (len(words), len(hsk_words))
+        version = (state_counts["new"], state_counts["learned"],
+                   state_counts["basic"], len(hsk_words))
         if version == self._dict_version:
             return
         self._words_map = {w.text: w for w in words}
