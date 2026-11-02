@@ -1,12 +1,15 @@
 """Text-to-speech client for OpenAI-compatible endpoints (Kokoro, §9.3).
 
-Accepts any common audio format the endpoint returns (MP3, WAV, OGG, FLAC)
-— servers differ: Kokoro-FastAPI returns MP3, some return WAV. `speed` is
-only sent when it differs from 1.0 (not every compatible server accepts it).
+Accepts any common audio format the endpoint returns (MP3, WAV, OGG, FLAC).
+Chinese voices skip Latin text, so mixed-script text is split into runs:
+Chinese runs use the main (Chinese) voice, Latin runs (letters/digits) use
+`latin_voice` (an English voice), and the audio is spliced back together.
+`speed` is only sent when it differs from 1.0 (not every server accepts it).
 """
 
 from __future__ import annotations
 
+import re
 import struct
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,12 +23,56 @@ class TtsConfig:
     model: str
     api_key: str | None = None
     voice: str | None = None
+    latin_voice: str | None = None  # English voice for Latin runs
     speed: float = 1.0
     timeout: float = 600.0
 
 
 class TtsError(Exception):
     """Any failure synthesizing or validating audio."""
+
+
+_CJK_CHAR_RE = re.compile(
+    r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff"  # ideographs
+    r"\u3000-\u303f\uff00-\uffef"                 # CJK punctuation / fullwidth
+    r"\u2018\u2019\u201c\u201d\u2013\u2014\u2026]"  # curly quotes, dashes, ellipsis
+)
+
+
+def _classify_char(ch: str) -> str | None:
+    if _CJK_CHAR_RE.match(ch):
+        return "zh"
+    if ch.isascii() and ch.isalnum():
+        return "latin"
+    return None  # spaces and neutral punctuation attach to a neighbor
+
+
+def split_by_script(text: str) -> list[tuple[str, str]]:
+    """Split text into [(segment, 'zh'|'latin')] runs, keeping order.
+
+    Neutral characters (spaces, ASCII punctuation) attach to the following
+    run, or to the previous run at the end of the text.
+    """
+    parts: list[tuple[str, str]] = []
+    buf = ""
+    cur_type: str | None = None
+    pending = ""
+    for ch in text:
+        char_type = _classify_char(ch)
+        if char_type is None:
+            pending += ch
+            continue
+        if cur_type is None:
+            cur_type, buf, pending = char_type, pending + ch, ""
+        elif char_type == cur_type:
+            buf += pending + ch
+            pending = ""
+        else:
+            parts.append((buf, cur_type))
+            cur_type, buf, pending = char_type, pending + ch, ""
+    if cur_type is not None:
+        parts.append((buf + pending, cur_type))
+    return [part for part in parts if part[0].strip()]
 
 
 def detect_audio_format(data: bytes) -> str | None:
@@ -101,11 +148,31 @@ class TtsService:
         )
 
     def synthesize(self, text: str) -> bytes:
-        """Synthesize `text` and return validated audio bytes (any format)."""
+        """Synthesize `text` and return validated audio bytes (any format).
+
+        Mixed-script text (Chinese + Latin) is synthesized run by run —
+        Chinese runs with the main voice, Latin runs with `latin_voice` —
+        and spliced back together in order.
+        """
+        segments = split_by_script(text)
+        has_latin = any(kind == "latin" for _seg, kind in segments)
+        latin_voice = (self._config.latin_voice or "").strip()
+        if not has_latin or not latin_voice:
+            return self._synthesize_segment(text, self._config.voice)
+
+        chunks: list[bytes] = []
+        for segment, kind in segments:
+            voice = latin_voice if kind == "latin" else self._config.voice
+            chunks.append(self._synthesize_segment(segment, voice))
+        audio_format = detect_audio_format(chunks[0])
+        return concat_audio(chunks, audio_format)
+
+    def _synthesize_segment(self, text: str, voice: str | None) -> bytes:
+        """One request with one voice; validates the returned audio."""
         kwargs: dict = {
             "model": self._config.model,
             "input": text,
-            "voice": self._config.voice or "default",
+            "voice": voice or "default",
             "response_format": "mp3",
         }
         if self._config.speed != 1.0:

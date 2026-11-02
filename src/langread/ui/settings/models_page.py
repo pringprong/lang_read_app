@@ -112,6 +112,11 @@ class _TtsGroup(QGroupBox):
         self.model.setPlaceholderText("e.g. kokoro")
         self.voice = QLineEdit()
         self.voice.setPlaceholderText("Chinese voice name, e.g. zf_xiaobei")
+        self.latin_voice = QLineEdit()
+        self.latin_voice.setPlaceholderText(
+            "English voice for Latin words in the text, e.g. af_heart "
+            "(leave empty to skip them)"
+        )
         self.speed = QDoubleSpinBox()
         self.speed.setRange(0.5, 2.0)
         self.speed.setSingleStep(0.05)
@@ -122,6 +127,7 @@ class _TtsGroup(QGroupBox):
         form.addRow("API key:", self.api_key)
         form.addRow("Model:", self.model)
         form.addRow("Voice:", self.voice)
+        form.addRow("Latin voice:", self.latin_voice)
         form.addRow("Speed:", self.speed)
 
         self.test_button = QPushButton("Test connection")
@@ -140,6 +146,7 @@ class _TtsGroup(QGroupBox):
         self.api_key.setText(str(values.get("api_key") or ""))
         self.model.setText(str(values.get("model") or ""))
         self.voice.setText(str(values.get("voice") or ""))
+        self.latin_voice.setText(str(values.get("latin_voice") or ""))
         speed = values.get("speed")
         self.speed.setValue(float(speed) if speed not in (None, "") else 1.0)
 
@@ -148,6 +155,7 @@ class _TtsGroup(QGroupBox):
             "tts",
             {"base_url": self.base_url.text(), "api_key": self.api_key.text(),
              "model": self.model.text(), "voice": self.voice.text(),
+             "latin_voice": self.latin_voice.text(),
              "speed": self.speed.value()},
         )
 

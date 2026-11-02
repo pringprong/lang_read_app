@@ -51,8 +51,12 @@ class TemplatesPage(QWidget):
 
         self.save_button = QPushButton("Save template")
         self.save_button.clicked.connect(self._save)
-        self.reset_button = QPushButton("Reset to saved")
-        self.reset_button.clicked.connect(self._load_current)
+        self.reset_button = QPushButton("Restore all defaults…")
+        self.reset_button.setToolTip(
+            "Overwrite every template with the bundled defaults "
+            "(any manual edits are lost)."
+        )
+        self.reset_button.clicked.connect(self._restore_defaults)
 
         buttons = QHBoxLayout()
         buttons.addWidget(self.reset_button)
@@ -98,3 +102,19 @@ class TemplatesPage(QWidget):
             return
         self.repo.upsert(name, self.editor.toPlainText())
         self._dirty = False
+
+    def _restore_defaults(self) -> None:
+        """Overwrite all templates with the bundled defaults (confirmed)."""
+        from PySide6.QtWidgets import QMessageBox
+
+        answer = QMessageBox.question(
+            self, "Restore defaults",
+            "Overwrite ALL prompt templates with the bundled defaults? "
+            "Any manual edits will be lost.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        self.repo.seed_defaults(force=True)
+        self._reload_list()

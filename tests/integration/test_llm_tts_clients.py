@@ -12,6 +12,7 @@ from langread.services.tts import (
     concat_audio,
     detect_audio_format,
     looks_like_mp3,
+    split_by_script,
 )
 
 from tests.fakes.openai_server import FakeOpenAiServer, make_wav
@@ -125,6 +126,59 @@ def test_tts_json_error_response_reported(server):
     service = TtsService(TtsConfig(base_url=server.base_url, model="kokoro"))
     with pytest.raises(TtsError, match="not recognized audio|error"):
         service.synthesize("你好")
+
+
+# ---- mixed-script synthesis (Chinese voice skips Latin text) ----
+
+
+def test_split_by_script():
+    # pure Chinese (with punctuation) → one run
+    assert split_by_script("今天天气很好。") == [("今天天气很好。", "zh")]
+    # pure Latin → one run
+    assert split_by_script("HSK exam") == [("HSK exam", "latin")]
+    # mixed: order preserved, punctuation attached sensibly
+    parts = split_by_script("我要考HSK考试。")
+    assert [kind for _s, kind in parts] == ["zh", "latin", "zh"]
+    assert parts[1][0] == "HSK"
+    assert "".join(seg for seg, _k in parts) == "我要考HSK考试。"
+    # spaces between scripts
+    parts = split_by_script("HSK 很好")
+    assert [kind for _s, kind in parts] == ["latin", "zh"]
+
+
+def test_tts_mixed_text_uses_both_voices(server):
+    """Chinese runs use the main voice; Latin runs use the latin voice."""
+    service = TtsService(
+        TtsConfig(base_url=server.base_url, model="kokoro",
+                  voice="zf_xiaobei", latin_voice="af_heart")
+    )
+    data = service.synthesize("我要考HSK考试。")
+    assert looks_like_mp3(data)
+    assert len(server.speech_calls) == 3  # zh + latin + zh
+    voices = [call["voice"] for call in server.speech_calls]
+    assert voices == ["zf_xiaobei", "af_heart", "zf_xiaobei"]
+    inputs = [call["input"] for call in server.speech_calls]
+    assert inputs[0] == "我要考"
+    assert inputs[1] == "HSK"
+
+
+def test_tts_pure_chinese_single_call_even_with_latin_voice(server):
+    service = TtsService(
+        TtsConfig(base_url=server.base_url, model="kokoro",
+                  voice="zf_xiaobei", latin_voice="af_heart")
+    )
+    service.synthesize("你好。")
+    assert len(server.speech_calls) == 1
+
+
+def test_tts_mixed_text_without_latin_voice_skips(server):
+    """No latin voice configured → old behavior: one call, Latin skipped."""
+    service = TtsService(
+        TtsConfig(base_url=server.base_url, model="kokoro", voice="zf_xiaobei")
+    )
+    service.synthesize("我要考HSK考试。")
+    assert len(server.speech_calls) == 1
+    assert server.speech_calls[0]["voice"] == "zf_xiaobei"
 
 
 # ---- extract_json unit cases ----

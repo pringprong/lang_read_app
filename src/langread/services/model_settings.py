@@ -46,11 +46,11 @@ class ModelSettings:
         return {
             key: self.repo.get(f"{prefix}.{key}", default="")
             for key in ("base_url", "api_key", "model", "temperature",
-                        "voice", "speed")
+                        "voice", "latin_voice", "speed")
         }
 
     def save(self, prefix: str, values: dict) -> None:
-        for key in ("base_url", "api_key", "model", "voice"):
+        for key in ("base_url", "api_key", "model", "voice", "latin_voice"):
             if key in values:
                 self.repo.set(f"{prefix}.{key}", str(values[key]).strip())
         if "temperature" in values and values["temperature"] != "":
@@ -76,6 +76,7 @@ class ModelSettings:
             model=_require(values, "model", "tts"),
             api_key=(values.get("api_key") or "").strip() or None,
             voice=str(values.get("voice") or "").strip() or None,
+            latin_voice=str(values.get("latin_voice") or "").strip() or None,
             speed=float(values.get("speed") or 1.0),
         )
 
