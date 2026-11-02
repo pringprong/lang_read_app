@@ -63,6 +63,12 @@ class LessonsRepo:
         ).fetchall()
         return [self._row_to_lesson(r) for r in rows]
 
+    def list_all(self) -> list[Lesson]:
+        rows = self.conn.execute(
+            "SELECT * FROM lessons ORDER BY topic_id, order_index, id"
+        ).fetchall()
+        return [self._row_to_lesson(r) for r in rows]
+
     def set_status(self, lesson_id: int, status: str) -> None:
         if status not in LESSON_STATUSES:
             raise ValueError(f"invalid lesson status: {status}")

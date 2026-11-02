@@ -2,14 +2,15 @@
 
 Topic dropdown + lesson table showing order, status, and when each lesson
 was last reviewed (or "never"). Incomplete lessons offer "Finish saving"
-(resume of the M7 pipeline).
+(resume of the M7 pipeline). Audio can be re-synthesized for the selected
+lesson or for every lesson (e.g. after TTS settings change).
 """
 
 from __future__ import annotations
 
 import sqlite3
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
@@ -24,21 +25,68 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+from langread.db import connect
 from langread.db.repositories import LessonsRepo, SentencesRepo, TopicsRepo
 
 _LESSON_COLUMNS = ["#", "Status", "Last reviewed", "Paragraphs"]
 
 
+class RegenerateAudioWorker(QThread):
+    """Re-synthesizes audio for one or more lessons in a background thread.
+
+    Per-lesson failures don't abort the batch; they are collected and
+    reported together at the end.
+    """
+
+    progress = Signal(int, int, int)          # lesson_id, current, total
+    finished_batch = Signal(object, object)   # ok_ids, [(lesson_id, error)]
+
+    def __init__(self, db_path, lesson_ids: list[int], parent=None) -> None:
+        super().__init__(parent)
+        self._db_path = db_path
+        self._lesson_ids = lesson_ids
+
+    def run(self) -> None:
+        from langread.db.repositories import SettingsRepo
+        from langread.services.lesson_saver import LessonSaver
+        from langread.services.model_settings import ModelSettings
+        from langread.services.tts import TtsService
+
+        ok: list[int] = []
+        failed: list[tuple[int, str]] = []
+        conn = connect(self._db_path)
+        try:
+            tts = TtsService(ModelSettings(SettingsRepo(conn)).tts_config())
+            saver = LessonSaver(conn, tts=tts)
+            total = len(self._lesson_ids)
+            for index, lesson_id in enumerate(self._lesson_ids):
+                self.progress.emit(lesson_id, index + 1, total)
+                try:
+                    saver.regenerate_audio(lesson_id)
+                    ok.append(lesson_id)
+                except Exception as exc:  # noqa: BLE001 - batch continues
+                    failed.append((lesson_id, str(exc)))
+        finally:
+            conn.close()
+        self.finished_batch.emit(ok, failed)
+
+
 class LessonListDialog(QDialog):
-    def __init__(self, conn: sqlite3.Connection, parent=None) -> None:
+    def __init__(self, conn: sqlite3.Connection, db_path=None, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Review a lesson")
-        self.resize(640, 480)
+        self.resize(640, 500)
         self.conn = conn
+        self._db_path = db_path
+        if db_path is None:
+            from langread.app_config import db_path as default_db_path
+
+            self._db_path = default_db_path()
         self.topics = TopicsRepo(conn)
         self.lessons = LessonsRepo(conn)
         self.sentences = SentencesRepo(conn)
         self._finalize_worker = None
+        self._regenerate_worker = None
 
         self.topic_combo = QComboBox()
         for topic in self.topics.list_all():
@@ -61,12 +109,28 @@ class LessonListDialog(QDialog):
         self.finish_button = QPushButton("Finish saving")
         self.finish_button.clicked.connect(self._finish_saving)
         self.finish_button.setEnabled(False)
+        self.regenerate_button = QPushButton("Regenerate audio")
+        self.regenerate_button.setToolTip(
+            "Re-synthesize this lesson's audio (e.g. after changing TTS "
+            "settings or the Latin voice)"
+        )
+        self.regenerate_button.clicked.connect(self._regenerate_selected)
+        self.regenerate_button.setEnabled(False)
+        self.regenerate_all_button = QPushButton("Regenerate ALL audio…")
+        self.regenerate_all_button.setToolTip(
+            "Re-synthesize the audio of every lesson in the app"
+        )
+        self.regenerate_all_button.clicked.connect(self._regenerate_all)
         self.close_button = QPushButton("Close")
         self.close_button.clicked.connect(self.accept)
+
+        self.status_label = QLabel("")
 
         buttons = QHBoxLayout()
         buttons.addWidget(self.review_button)
         buttons.addWidget(self.finish_button)
+        buttons.addWidget(self.regenerate_button)
+        buttons.addWidget(self.regenerate_all_button)
         buttons.addStretch(1)
         buttons.addWidget(self.close_button)
 
@@ -77,6 +141,7 @@ class LessonListDialog(QDialog):
         layout.addLayout(topic_row)
         layout.addWidget(self.table, 1)
         layout.addLayout(buttons)
+        layout.addWidget(self.status_label)
 
         if self.topic_combo.count() == 0:
             QMessageBox.information(
@@ -125,6 +190,11 @@ class LessonListDialog(QDialog):
 
     def _update_finish_button(self, status: str | None) -> None:
         self.finish_button.setEnabled(status == "incomplete")
+        lesson_id = self._selected_lesson_id()
+        self.regenerate_button.setEnabled(
+            lesson_id is not None
+            and bool(self.sentences.list_for_lesson(lesson_id))
+        )
 
     # ---- actions ----
 
@@ -160,4 +230,67 @@ class LessonListDialog(QDialog):
         self.finish_button.setText("Finish saving")
         self.finish_button.setEnabled(True)
         QMessageBox.warning(self, "Saving failed", message)
+
+    # ---- audio regeneration ----
+
+    def _regenerate_selected(self) -> None:
+        lesson_id = self._selected_lesson_id()
+        if lesson_id is None:
+            return
+        self._start_regeneration([lesson_id])
+
+    def _regenerate_all(self) -> None:
+        lesson_ids = [lesson.id for lesson in self.lessons.list_all()]
+        if not lesson_ids:
+            return
+        answer = QMessageBox.question(
+            self, "Regenerate all audio",
+            f"Re-synthesize the audio of all {len(lesson_ids)} lesson(s)? "
+            "This re-runs text-to-speech for every paragraph and may take "
+            "a while.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        self._start_regeneration(lesson_ids)
+
+    def _start_regeneration(self, lesson_ids: list[int]) -> None:
+        self.regenerate_button.setEnabled(False)
+        self.regenerate_all_button.setEnabled(False)
+        self.regenerate_all_button.setText("Regenerating…")
+        self._regenerate_worker = RegenerateAudioWorker(
+            self._db_path, lesson_ids, parent=self
+        )
+        self._regenerate_worker.progress.connect(self._on_regenerate_progress)
+        self._regenerate_worker.finished_batch.connect(self._on_regenerate_done)
+        self._regenerate_worker.start()
+
+    def _on_regenerate_progress(self, lesson_id: int, current: int, total: int) -> None:
+        self.status_label.setText(
+            f"Regenerating audio — lesson {lesson_id} ({current}/{total})"
+        )
+
+    def _on_regenerate_done(self, ok_ids, failures) -> None:
+        self.regenerate_all_button.setText("Regenerate ALL audio…")
+        self.regenerate_all_button.setEnabled(True)
+        self._on_cell_clicked(self.table.currentRow(), 0)  # refresh enabled state
+        self._reload_lessons()
+        if failures:
+            details = "\n".join(f"lesson {lid}: {err}" for lid, err in failures)
+            QMessageBox.warning(
+                self, "Audio regeneration",
+                f"Finished with {len(ok_ids)} success(es) and "
+                f"{len(failures)} failure(s):\n{details}",
+            )
+            self.status_label.setText(
+                f"⚠ {len(ok_ids)} regenerated, {len(failures)} failed"
+            )
+        else:
+            self.status_label.setText(f"✅ Audio regenerated ({len(ok_ids)} lesson(s)).")
+
+    def wait_for_regenerate_worker(self) -> None:
+        """Used by tests: block until the regeneration worker finishes."""
+        if self._regenerate_worker is not None:
+            self._regenerate_worker.wait()
 

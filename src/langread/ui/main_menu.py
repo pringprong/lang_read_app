@@ -83,7 +83,7 @@ class MainMenu(QMainWindow):
         elif index == 0:
             from langread.ui.topic_lesson_list import LessonListDialog
 
-            LessonListDialog(self.conn(), parent=self).exec()
+            LessonListDialog(self.conn(), db_path=db_path(), parent=self).exec()
         elif index == 3:
             from langread.ui.words.add_words import AddWordsDialog
 

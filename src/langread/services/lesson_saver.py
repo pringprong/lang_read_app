@@ -205,6 +205,30 @@ class LessonSaver:
                 return candidate
         return None
 
+    # ---- audio regeneration ----
+
+    def regenerate_audio(self, lesson_id: int,
+                         progress: ProgressFn | None = None) -> Lesson:
+        """Delete the lesson's audio file and synthesize it fresh.
+
+        Used when the TTS setup changed (e.g. a Latin voice was configured
+        after the original synthesis skipped Latin text).
+        """
+        lesson = self.lessons.get(lesson_id)
+        if lesson is None:
+            raise SaveError(f"lesson {lesson_id} does not exist")
+        if not self.sentences.list_for_lesson(lesson_id):
+            raise SaveError(f"lesson {lesson_id} has no sentences")
+        for suffix in (".mp3", ".wav", ".ogg", ".flac"):
+            candidate = self._audio_dir / f"lesson_{lesson_id}{suffix}"
+            if candidate.exists():
+                candidate.unlink()
+        self.lessons.set_audio_path(lesson_id, None)
+        self._generate_audio(lesson_id, progress)
+        result = self.lessons.get(lesson_id)
+        assert result is not None
+        return result
+
     def _paragraph_texts(self, lesson_id: int) -> list[str]:
         sentences = self.sentences.list_for_lesson(lesson_id)
         paragraphs: dict[int, list[str]] = {}
