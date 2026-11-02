@@ -67,6 +67,8 @@ class _LlmGroup(QGroupBox):
         self.save()
         # resolve the config on the UI thread (SQLite connections are
         # thread-bound); the worker only performs the network call
+        from dataclasses import replace
+
         from langread.services.model_settings import ModelSettingsError
 
         try:
@@ -74,6 +76,8 @@ class _LlmGroup(QGroupBox):
         except ModelSettingsError as exc:
             self.status.setText(f"❌ {exc}")
             return
+        # short timeout so an unreachable endpoint fails visibly, not silently
+        config = replace(config, timeout=15.0)
         self.test_button.setEnabled(False)
         self.status.setText("Testing…")
         from langread.services.llm_client import LlmClient
@@ -151,6 +155,8 @@ class _TtsGroup(QGroupBox):
         self.save()
         # resolve the config on the UI thread (SQLite connections are
         # thread-bound); the worker only performs the network call
+        from dataclasses import replace
+
         from langread.services.model_settings import ModelSettingsError
 
         try:
@@ -158,6 +164,8 @@ class _TtsGroup(QGroupBox):
         except ModelSettingsError as exc:
             self.status.setText(f"❌ {exc}")
             return
+        # short timeout so an unreachable endpoint fails visibly, not silently
+        config = replace(config, timeout=30.0)
         self.test_button.setEnabled(False)
         self.status.setText("Testing…")
         from langread.services.tts import TtsService

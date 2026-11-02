@@ -121,6 +121,24 @@ def test_models_page_test_button_reports_missing_config(qapp, conn):
     assert llm_group.test_button.isEnabled()
 
 
+def test_models_page_test_connection_failure_shows_error(qapp, conn):
+    """Unreachable endpoint → visible error within the short test timeout."""
+    repo = SettingsRepo(conn)
+    repo.set("gen.base_url", "http://127.0.0.1:1/v1")  # nothing listens here
+    repo.set("gen.model", "x")
+    page = ModelsPage(conn)
+    group = page._groups[0]
+    group._test()
+    assert group._worker is not None
+    group._worker.wait(20000)  # well under the 120s default timeout
+    for _ in range(10):
+        qapp.processEvents()
+    status = group.status.text()
+    assert "❌" in status
+    assert "Testing" not in status
+    assert group.test_button.isEnabled()
+
+
 def test_templates_page_edit_and_save(qapp, conn):
     TemplatesRepo(conn).seed_defaults()
     page = TemplatesPage(conn)
