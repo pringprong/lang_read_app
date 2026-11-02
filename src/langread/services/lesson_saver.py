@@ -23,7 +23,11 @@ from langread.models import Lesson, Sentence
 from langread.services.generation import LessonDraft
 from langread.services.srs import SrsService
 from langread.services.translation import TranslationService, pinyin_fallback
-from langread.services.tts import TtsService, looks_like_mp3
+from langread.services.tts import (
+    TtsService,
+    concat_audio,
+    detect_audio_format,
+)
 
 ProgressFn = Callable[[str, int, int], None]
 
@@ -171,9 +175,9 @@ class LessonSaver:
                 "text-to-speech model is not configured "
                 "(open Model settings to set it)"
             )
-        out_path = self._audio_dir / f"lesson_{lesson_id}.mp3"
-        if out_path.exists() and out_path.stat().st_size > 0:
-            self.lessons.set_audio_path(lesson_id, out_path.name)
+        existing = self._find_existing_audio(lesson_id)
+        if existing is not None:
+            self.lessons.set_audio_path(lesson_id, existing.name)
             return  # already synthesized (resume)
         paragraphs = self._paragraph_texts(lesson_id)
         chunks: list[bytes] = []
@@ -184,12 +188,22 @@ class LessonSaver:
                 chunks.append(self.tts.synthesize(text))
             except Exception as exc:
                 raise SaveError(f"audio generation failed: {exc}") from exc
-        data = b"".join(chunks)
-        if not looks_like_mp3(data):
-            raise SaveError("TTS produced invalid MP3 data")
+        audio_format = detect_audio_format(chunks[0]) if chunks else None
+        if audio_format is None:
+            raise SaveError("TTS produced unrecognized audio data")
+        data = concat_audio(chunks, audio_format)
+        out_path = self._audio_dir / f"lesson_{lesson_id}.{audio_format}"
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_bytes(data)
         self.lessons.set_audio_path(lesson_id, out_path.name)
+
+    def _find_existing_audio(self, lesson_id: int) -> Path | None:
+        """Any previously written lesson audio file (mp3/wav/ogg/flac)."""
+        for suffix in (".mp3", ".wav", ".ogg", ".flac"):
+            candidate = self._audio_dir / f"lesson_{lesson_id}{suffix}"
+            if candidate.exists() and candidate.stat().st_size > 0:
+                return candidate
+        return None
 
     def _paragraph_texts(self, lesson_id: int) -> list[str]:
         sentences = self.sentences.list_for_lesson(lesson_id)

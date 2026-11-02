@@ -5,9 +5,16 @@ from __future__ import annotations
 import pytest
 
 from langread.services.llm_client import LlmClient, LlmConfig, LlmError, extract_json
-from langread.services.tts import TtsConfig, TtsError, TtsService, looks_like_mp3
+from langread.services.tts import (
+    TtsConfig,
+    TtsError,
+    TtsService,
+    concat_audio,
+    detect_audio_format,
+    looks_like_mp3,
+)
 
-from tests.fakes.openai_server import FakeOpenAiServer
+from tests.fakes.openai_server import FakeOpenAiServer, make_wav
 
 
 @pytest.fixture()
@@ -62,6 +69,53 @@ def test_tts_rejects_non_mp3_response(server):
     server.break_mp3 = True
     service = TtsService(TtsConfig(base_url=server.base_url, model="kokoro"))
     with pytest.raises(TtsError):
+        service.synthesize("你好")
+
+
+def test_tts_accepts_wav_response(server):
+    """Servers that return WAV (e.g. some OpenAI-compatible TTS) are fine."""
+    server.return_wav = True
+    service = TtsService(TtsConfig(base_url=server.base_url, model="kokoro"))
+    data = service.synthesize("你好")
+    assert detect_audio_format(data) == "wav"
+    assert looks_like_mp3(data) is False
+
+
+def test_detect_audio_format():
+    assert detect_audio_format(b"ID3" + b"\x00" * 10) == "mp3"
+    assert detect_audio_format(b"\xff\xfb" + b"\x00" * 10) == "mp3"
+    assert detect_audio_format(make_wav()) == "wav"
+    assert detect_audio_format(b"OggS" + b"\x00" * 10) == "ogg"
+    assert detect_audio_format(b"fLaC" + b"\x00" * 10) == "flac"
+    assert detect_audio_format(b"not audio at all") is None
+    assert detect_audio_format(b"") is None
+
+
+def test_concat_audio_wav_merge():
+    chunks = [make_wav(50), make_wav(30)]
+    merged = concat_audio(chunks, "wav")
+    assert detect_audio_format(merged) == "wav"
+    from langread.services.tts import _parse_wav
+
+    _fmt, data = _parse_wav(merged)
+    assert len(data) == 80 * 2  # 50 + 30 samples × 2 bytes
+    # RIFF size field covers the whole file
+    import struct
+
+    assert struct.unpack("<I", merged[4:8])[0] == len(merged) - 8
+
+
+def test_concat_audio_mp3_join():
+    chunks = [b"ID3" + b"a" * 10, b"\xff\xfb" + b"b" * 10]
+    assert concat_audio(chunks, "mp3") == b"".join(chunks)
+
+
+def test_tts_json_error_response_reported(server):
+    """Non-audio replies (some servers return errors with HTTP 200) are
+    reported with the response head, not accepted as audio."""
+    server.break_mp3 = True
+    service = TtsService(TtsConfig(base_url=server.base_url, model="kokoro"))
+    with pytest.raises(TtsError, match="not recognized audio|error"):
         service.synthesize("你好")
 
 

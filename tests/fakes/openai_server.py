@@ -2,14 +2,24 @@
 
 Implements:
   POST /v1/chat/completions  → canned reply (optionally broken JSON first)
-  POST /v1/audio/speech      → fake MP3 bytes (optionally garbage)
+  POST /v1/audio/speech      → fake MP3 or WAV bytes (optionally garbage)
 """
 
 from __future__ import annotations
 
 import json
+import struct
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+
+def make_wav(num_samples: int = 100) -> bytes:
+    """A minimal valid PCM 16-bit mono 24 kHz WAV file."""
+    fmt = b"fmt " + struct.pack("<IHHIIHH", 16, 1, 1, 24000, 48000, 2, 16)
+    payload = b"\x00\x01" * num_samples
+    data = b"data" + struct.pack("<I", len(payload)) + payload
+    riff = b"RIFF" + struct.pack("<I", 4 + len(fmt) + len(data)) + b"WAVE"
+    return riff + fmt + data
 
 
 class FakeOpenAiServer:
@@ -17,7 +27,8 @@ class FakeOpenAiServer:
         self.chat_calls: list[dict] = []
         self.speech_calls: list[dict] = []
         self.break_json_once = False  # first chat call returns non-JSON
-        self.break_mp3 = False        # speech returns non-MP3 bytes
+        self.break_mp3 = False        # speech returns non-audio bytes
+        self.return_wav = False       # speech returns WAV instead of MP3
         self._lock = threading.Lock()
         self._server: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
@@ -75,7 +86,13 @@ class FakeOpenAiServer:
                     with outer._lock:
                         outer.speech_calls.append(body)
                         bad = outer.break_mp3
-                    data = b"<html>error</html>" if bad else b"ID3" + b"\x00" * 64
+                        wav = outer.return_wav
+                    if bad:
+                        data = b"<html>error</html>"
+                    elif wav:
+                        data = make_wav()
+                    else:
+                        data = b"ID3" + b"\x00" * 64
                     self._send(200, data, "audio/mpeg")
                 else:
                     self._send(404, {"error": "not found"}, "application/json")
@@ -100,3 +117,4 @@ class FakeOpenAiServer:
         if self._server is not None:
             self._server.shutdown()
             self._server = None
+

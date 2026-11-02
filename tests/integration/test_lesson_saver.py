@@ -220,3 +220,32 @@ def test_hsk_link_promoted_to_learned(env):
     assert HskRepo(conn).find_by_text(hsk_word)[0].app_state == "learned"
 
 
+def test_save_lesson_with_wav_tts(env):
+    """A TTS server returning WAV still produces a valid single lesson
+    audio file (properly merged), stored with the .wav extension."""
+    from tests.fakes.openai_server import make_wav
+
+    conn, _topic, draft, audio_dir = env
+
+    class WavTtsStub:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def synthesize(self, text: str) -> bytes:
+            self.calls += 1
+            return make_wav()
+
+    saver = _saver(conn, audio_dir, WavTtsStub(), TranslationStub())
+    lesson = saver.save_lesson(draft)
+    assert lesson.status == "complete"
+    assert lesson.audio_path == f"lesson_{lesson.id}.wav"
+    audio_file = audio_dir / lesson.audio_path
+    assert audio_file.exists()
+    from langread.services.tts import detect_audio_format
+
+    data = audio_file.read_bytes()
+    assert detect_audio_format(data) == "wav"
+    # 6 paragraphs merged into one file: data payload = 6 × 100 samples × 2 bytes
+    assert data[44:] == make_wav(100)[44:] * 6
+
+
