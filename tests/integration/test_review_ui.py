@@ -185,11 +185,62 @@ def test_bulk_rating(qapp, env):
     window.close()
 
 
-def test_jump_to_end_enters_word_review(qapp, env):
+def test_jump_to_end_does_not_auto_advance(qapp, env):
+    """§8.5: audio controls never auto-advance — the user decides when to go
+    to the word review (listens multiple times)."""
     conn, _topic, lesson_id = env
     window = LessonReviewWindow(conn, lesson_id)
-    window.audio_bar._jump_to_end()  # §8.5: jump to the end
+    window.audio_bar._jump_to_end()
+    assert window.stack.currentIndex() == 0  # still on the reading page
+    window.close()
+
+
+def test_word_review_button_enters_word_review(qapp, env):
+    conn, _topic, lesson_id = env
+    window = LessonReviewWindow(conn, lesson_id)
+    window.word_review_button.click()
     assert window.stack.currentIndex() == 1
     assert window.review_page.table.rowCount() > 0
+    window.close()
+
+
+def test_dark_mode_renders_light_text(qapp, env):
+    """Palette-aware stylesheet: dark palette → light text color in CSS."""
+    from PySide6.QtGui import QColor, QPalette
+
+    conn, _topic, lesson_id = env
+    window = LessonReviewWindow(conn, lesson_id)
+    browser = window.text_browser
+    dark = QPalette()
+    dark.setColor(QPalette.ColorRole.Base, QColor("#2b2b2b"))
+    dark.setColor(QPalette.ColorRole.Text, QColor("#eeeeee"))
+    dark.setColor(QPalette.ColorRole.Link, QColor("#7ab8ff"))
+    browser.setPalette(dark)
+    window._render_text()  # palette change would also trigger this
+    css = browser.document().defaultStyleSheet()
+    assert "#eeeeee" in css          # body/anchor text color from palette
+    assert "#b8b8b8" in css          # light-gray translation color
+    assert "#202020" in css          # new-word highlight keeps dark text
+
+    # light palette → dark text
+    light = QPalette()
+    light.setColor(QPalette.ColorRole.Base, QColor("#ffffff"))
+    light.setColor(QPalette.ColorRole.Text, QColor("#000000"))
+    browser.setPalette(light)
+    window._render_text()
+    css = browser.document().defaultStyleSheet()
+    assert "#000000" in css
+    assert "#606060" in css          # dark-gray translation color
+    window.close()
+
+
+def test_translation_toggle_spacing(qapp, env):
+    """The [译] toggle is separated from the FOLLOWING sentence so it groups
+    with its own sentence."""
+    conn, _topic, lesson_id = env
+    window = LessonReviewWindow(conn, lesson_id)
+    html_text = window._last_html
+    assert '[译]</a>&nbsp;&nbsp; ' in html_text
+    assert '<a class="tr" href="tr:' in html_text
     window.close()
 

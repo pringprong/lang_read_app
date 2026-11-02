@@ -125,17 +125,13 @@ class LessonReviewWindow(QDialog):
         self._render_text()
 
     def _build_ui(self) -> None:
-        from PySide6.QtWidgets import QTextBrowser, QVBoxLayout
+        from PySide6.QtWidgets import QHBoxLayout, QPushButton, QTextBrowser, QVBoxLayout
 
         # ---- page 1: reading ----
         self.text_browser = QTextBrowser()
         self.text_browser.setOpenLinks(False)
         self.text_browser.anchorClicked.connect(self._on_anchor)
-        self.text_browser.document().setDefaultStyleSheet(
-            "a.new { background-color: #fff1a8; } "
-            "a { color: inherit; text-decoration: none; } "
-            ".translation { color: gray; }"
-        )
+
         from langread.app_config import audio_dir
 
         audio_file = None
@@ -145,8 +141,11 @@ class LessonReviewWindow(QDialog):
         from langread.ui.review.audio_bar import AudioBar
 
         self.audio_bar = AudioBar(audio_file, parent=self)
-        self.audio_bar.ended.connect(self._enter_word_review)
 
+        # explicit navigation to the word review — the audio may be listened
+        # to several times before continuing, so nothing auto-advances
+        self.word_review_button = QPushButton("Word review →")
+        self.word_review_button.clicked.connect(self._enter_word_review)
         cancel_button = QPushButton("Cancel review")
         cancel_button.clicked.connect(self.reject)
 
@@ -154,7 +153,11 @@ class LessonReviewWindow(QDialog):
         reading_layout = QVBoxLayout(reading_page)
         reading_layout.addWidget(self.text_browser, 1)
         reading_layout.addWidget(self.audio_bar)
-        reading_layout.addWidget(cancel_button, alignment=Qt.AlignmentFlag.AlignLeft)
+        nav_row = QHBoxLayout()
+        nav_row.addWidget(cancel_button)
+        nav_row.addStretch(1)
+        nav_row.addWidget(self.word_review_button)
+        reading_layout.addLayout(nav_row)
 
         # ---- page 2: word review ----
         self.review_page = _WordReviewPage(self)
@@ -170,9 +173,36 @@ class LessonReviewWindow(QDialog):
 
     # ---- text rendering (§8.2–8.4) ----
 
+    def _stylesheet(self) -> str:
+        """Palette-aware CSS so dark mode renders readable text."""
+        from PySide6.QtGui import QPalette
+
+        palette = self.text_browser.palette()
+        base = palette.color(QPalette.ColorRole.Base)
+        text = palette.color(QPalette.ColorRole.Text).name()
+        is_dark = base.lightnessF() < 0.5
+        translation = "#b8b8b8" if is_dark else "#606060"
+        link = palette.color(QPalette.ColorRole.Link).name()
+        return (
+            f"body {{ color: {text}; }} "
+            f"a {{ color: {text}; text-decoration: none; }} "
+            f"a.tr {{ color: {link}; text-decoration: none; }} "
+            f"a.new {{ background-color: #ffe08a; color: #202020; }} "
+            f".translation {{ color: {translation}; }}"
+        )
+
+    def changeEvent(self, event) -> None:  # noqa: N802 (Qt naming)
+        from PySide6.QtCore import QEvent
+
+        if event.type() == QEvent.Type.PaletteChange:
+            self._render_text()
+        super().changeEvent(event)
+
     def _render_text(self) -> None:
         scrollbar = self.text_browser.verticalScrollBar()
         scroll_position = scrollbar.value()
+        # the default stylesheet only applies to HTML set afterwards
+        self.text_browser.document().setDefaultStyleSheet(self._stylesheet())
         parts: list[str] = []
         current_para = None
         for sentence in self._sentences:
@@ -197,7 +227,9 @@ class LessonReviewWindow(QDialog):
             toggle = ""
             if sentence.translation:
                 label = "[hide 译]" if sentence.id in self._revealed else "[译]"
-                toggle = f' <a href="tr:{sentence.id}">{label}</a>'
+                # trailing separation so the toggle groups with ITS sentence,
+                # not the following one
+                toggle = f' <a class="tr" href="tr:{sentence.id}">{label}</a>&nbsp;&nbsp; '
             translation_html = ""
             if sentence.id in self._revealed and sentence.translation:
                 translation_html = (
