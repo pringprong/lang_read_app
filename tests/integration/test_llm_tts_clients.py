@@ -51,6 +51,14 @@ def test_chat_connection_failure_raises_llm_error():
         client.chat("hello")
 
 
+def test_chat_retries_after_empty_reply(server):
+    """Reasoning models occasionally return empty content — chat retries."""
+    server.empty_content_once = True
+    client = LlmClient(LlmConfig(base_url=server.base_url, model="fake"))
+    assert client.chat("hello") == "OK"  # retry succeeded
+    assert len(server.chat_calls) == 2
+
+
 def test_tts_synthesizes_mp3(server, tmp_path):
     service = TtsService(
         TtsConfig(base_url=server.base_url, model="kokoro", voice="zf_xiaobei")

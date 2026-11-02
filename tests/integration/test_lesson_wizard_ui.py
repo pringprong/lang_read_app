@@ -131,6 +131,41 @@ def test_wizard_full_flow(qapp, conn):
     assert wizard.stack.currentIndex() == 0
 
 
+def test_wizard_retry_after_generation_failure(qapp, conn, monkeypatch):
+    """After a failed generation, the button restarts generation instead of
+    doing nothing."""
+    from PySide6.QtWidgets import QMessageBox
+    from langread.services.llm_client import LlmError
+
+    class FailingLlm:
+        def chat(self, prompt: str) -> str:
+            raise LlmError("model returned an empty message")
+
+    monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: None)
+    _conn, topic_id, db_file = conn
+    wizard = LessonWizard(_conn, topic_id, "Cooking", llm=FailingLlm(),
+                          db_path=db_file)
+    for row in range(wizard.word_page.new_list.count()):
+        wizard.word_page.new_list.item(row).setCheckState(Qt.CheckState.Checked)
+    wizard._go_next()
+    wizard.generate_page.wait_for_worker()
+    for _ in range(10):
+        qapp.processEvents()
+    # generation failed: still on page 1, button relabelled and enabled
+    assert wizard.stack.currentIndex() == 1
+    assert "Retry" in wizard.next_button.text()
+    assert wizard.next_button.isEnabled()
+
+    # swap in a working model and press the button again → completes
+    wizard.generate_page._llm = ScriptedLlm()
+    wizard._go_next()
+    wizard.generate_page.wait_for_worker()
+    for _ in range(10):
+        qapp.processEvents()
+    assert wizard.stack.currentIndex() == 2
+    assert wizard._draft is not None
+
+
 def test_wizard_approve_saves_lesson(qapp, conn, monkeypatch, tmp_path):
     """End-to-end: generate → hand-edit-free approve → full save pipeline,
     with all three model endpoints pointed at the fake server."""

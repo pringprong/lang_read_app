@@ -16,6 +16,7 @@ from typing import Callable
 
 from langread.db.repositories import TemplatesRepo, TopicsRepo, WordsRepo
 from langread.services.cadence import CadenceError, CadencePlanner
+from langread.services.llm_client import LlmError
 from langread.services.segmentation import SegmentationService
 
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[。！？!?；;])")
@@ -178,7 +179,11 @@ class GenerationService:
 
     def _chat_until_valid(self, prompt: str, first_use: str | None,
                           requested: set[str]):
-        """Call the model; retry (≤2) if the first-use word is missing (§7.6)."""
+        """Call the model; retry (≤2) if the first-use word is missing (§7.6).
+
+        A retry that itself fails (e.g. an empty reply from a reasoning
+        model) keeps the earlier usable text instead of failing the lesson.
+        """
         text = _clean_reply(self.llm.chat(prompt))
         used = self._usage_of(text, requested)
         retries = 0
@@ -188,7 +193,11 @@ class GenerationService:
                 + f"\n\nIMPORTANT: The paragraph MUST contain the word “{first_use}” "
                 "exactly. Rewrite the paragraph with it."
             )
-            text = _clean_reply(self.llm.chat(retry_prompt))
+            try:
+                retry_text = _clean_reply(self.llm.chat(retry_prompt))
+            except LlmError:
+                break  # keep the earlier text; the word is simply missing
+            text = retry_text
             used = self._usage_of(text, requested)
             retries += 1
         return text, used, retries

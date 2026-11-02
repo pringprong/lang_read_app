@@ -29,6 +29,7 @@ class FakeOpenAiServer:
         self.break_json_once = False  # first chat call returns non-JSON
         self.break_mp3 = False        # speech returns non-audio bytes
         self.return_wav = False       # speech returns WAV instead of MP3
+        self.empty_content_once = False  # first chat call returns empty content
         self._lock = threading.Lock()
         self._server: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
@@ -66,11 +67,16 @@ class FakeOpenAiServer:
                         broken = outer.break_json_once
                         if broken:
                             outer.break_json_once = False
+                        empty = outer.empty_content_once
+                        if empty:
+                            outer.empty_content_once = False
                     prompt = ""
                     for message in body.get("messages", []):
                         if message.get("role") == "user":
                             prompt = message.get("content", "")
-                    if broken:
+                    if empty:
+                        content = ""  # simulate a reasoning model's empty reply
+                    elif broken:
                         content = "Sure! Here you go: (not valid json"
                     elif "JSON" in prompt or "json" in prompt:
                         content = '["你好", "世界"]'

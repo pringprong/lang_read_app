@@ -156,3 +156,27 @@ def test_suggest_lesson_words(conn):
     new_words, review_words = service.suggest_lesson_words(topic_id)
     assert set(NEW) <= set(new_words)  # the 5 new words are suggested
     assert review_words == []  # nothing learned yet
+
+
+def test_retry_failure_keeps_earlier_text(conn):
+    """A retry that errors (e.g. empty reply) keeps the first usable text
+    instead of failing the whole lesson."""
+    from langread.services.llm_client import LlmError
+
+    _conn, topic_id = conn
+
+    class FlakyRetryLlm(ScriptedLlm):
+        """Omits the first-use word, then the retry call raises LlmError."""
+
+        def chat(self, prompt: str) -> str:
+            if "MUST contain" in prompt:
+                raise LlmError("model returned an empty message")
+            # return text without the new word (no "我们学X。" sentence)
+            return "咕复一也很有用。咕复二也很有用。"
+
+    service = GenerationService(_conn, llm=FlakyRetryLlm())
+    draft = service.generate_lesson(topic_id, NEW, REVIEW, 8)
+    # lesson still completes; paragraph 0 has text (word missing, noted)
+    assert len(draft.paragraphs) == 8
+    assert draft.paragraphs[0].text
+    assert NEW[0] not in draft.paragraphs[0].used_words

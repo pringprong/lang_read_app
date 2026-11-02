@@ -87,16 +87,24 @@ class LessonWizard(QDialog):
                 self.word_page.error_label.setText(error)
                 return
             self.word_page.error_label.setText("")
-            self.stack.setCurrentIndex(1)
-            self.step_label.setText("Step 2 of 3 — generating lesson text")
-            self.next_button.setEnabled(False)
-            self.generate_page.start(
-                self.word_page.selected_new(),
-                self.word_page.selected_review(),
-                self.word_page.paragraph_count(),
-            )
+            self._start_generation()
+        elif self.stack.currentIndex() == 1:
+            worker = self.generate_page._worker
+            if worker is None or worker.isFinished():
+                self._start_generation()  # retry after a failure
         elif self.stack.currentIndex() == 2:
             self.accept()
+
+    def _start_generation(self) -> None:
+        self.stack.setCurrentIndex(1)
+        self.step_label.setText("Step 2 of 3 — generating lesson text")
+        self.next_button.setEnabled(False)
+        self.next_button.setText("Generate lesson")
+        self.generate_page.start(
+            self.word_page.selected_new(),
+            self.word_page.selected_review(),
+            self.word_page.paragraph_count(),
+        )
 
     def _go_back(self) -> None:
         if self.stack.currentIndex() == 2:
@@ -130,7 +138,13 @@ class LessonWizard(QDialog):
 
     def _on_generation_failed(self, message: str) -> None:
         self.next_button.setEnabled(True)
-        QMessageBox.warning(self, "Generation failed", message)
+        self.next_button.setText("Retry generation")
+        QMessageBox.warning(
+            self,
+            "Generation failed",
+            f"{message}\n\nYou can retry with the same word selection "
+            "(Retry generation), or go back to change the words.",
+        )
 
     # ---- approval: run the save pipeline (§7.9) ----
 

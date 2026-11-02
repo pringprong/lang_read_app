@@ -20,7 +20,7 @@ class LlmConfig:
     model: str
     api_key: str | None = None
     temperature: float = 0.7
-    timeout: float = 120.0
+    timeout: float = 300.0  # local reasoning models can be slow
 
 
 class LlmError(Exception):
@@ -96,26 +96,47 @@ class LlmClient:
 
     def chat(self, prompt: str, *, system: str | None = None,
              temperature: float | None = None) -> str:
-        """Send one prompt; return the reply text."""
+        """Send one prompt; return the reply text.
+
+        Retries up to twice on an empty message — local reasoning models
+        (e.g. Qwen 'thinking' variants) occasionally return empty content
+        after producing only internal reasoning.
+        """
         messages: list[dict[str, str]] = []
         if system:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
-        try:
-            response = self._client.chat.completions.create(
-                model=self._config.model,
-                messages=messages,
-                temperature=self._config.temperature if temperature is None else temperature,
+
+        reasoning_seen = False
+        for attempt in range(3):  # initial attempt + 2 retries
+            try:
+                response = self._client.chat.completions.create(
+                    model=self._config.model,
+                    messages=messages,
+                    temperature=self._config.temperature if temperature is None else temperature,
+                )
+            except Exception as exc:  # network, auth, model-not-found, timeout…
+                raise LlmError(f"chat request failed: {exc}") from exc
+            try:
+                message = response.choices[0].message
+                content = getattr(message, "content", None)
+            except (AttributeError, IndexError) as exc:
+                raise LlmError(f"unexpected response shape: {response!r}") from exc
+            if content and content.strip():
+                return content.strip()
+            # empty content: note whether the model emitted reasoning instead
+            reasoning = getattr(message, "reasoning_content", None) or ""
+            if isinstance(reasoning, str) and reasoning.strip():
+                reasoning_seen = True
+
+        hint = ""
+        if reasoning_seen:
+            hint = (
+                " — the model produced only internal 'reasoning' with no "
+                "answer. Disable thinking/reasoning mode for this model in "
+                "LM Studio, or use a non-reasoning model."
             )
-        except Exception as exc:  # network, auth, model-not-found, timeout…
-            raise LlmError(f"chat request failed: {exc}") from exc
-        try:
-            content = response.choices[0].message.content
-        except (AttributeError, IndexError) as exc:
-            raise LlmError(f"unexpected response shape: {response!r}") from exc
-        if not content or not content.strip():
-            raise LlmError("model returned an empty message")
-        return content.strip()
+        raise LlmError(f"model returned an empty message{hint}")
 
     def chat_json(self, prompt: str, *, system: str | None = None) -> Any:
         """Send one prompt and parse a JSON reply.
