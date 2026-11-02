@@ -127,6 +127,10 @@ Environment notes:
 - [ ] **User production smoke test** (real models): configure LM Studio + Kokoro endpoints, run one lesson through create → generate → save → review.
 - [ ] **Windows build**: run the README's PowerShell commands on a Windows machine (same source tree, no code changes expected).
 
+### Post-M10 fixes
+
+- [x] Settings *Test connection* buttons hit the SQLite thread-affinity error (config was read from the worker thread). Fixed: config resolved on the UI thread; workers only perform network calls. Regression test added against the fake server (167 tests total).
+
 ## Verdict
 
 Desktop app (M0–M10) is **feature-complete per the plan's Definition of Done**,

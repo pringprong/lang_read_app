@@ -73,6 +73,54 @@ def test_models_page_reloads_saved_values(qapp, conn):
     assert trans_group.model.text() == "qwen-max"
 
 
+def test_models_page_test_connection_buttons(qapp, conn):
+    """Regression test: the Test buttons must not touch the (thread-bound)
+    SQLite connection from the worker thread."""
+    from tests.fakes.openai_server import FakeOpenAiServer
+
+    server = FakeOpenAiServer()
+    url = server.start_and_url()
+    try:
+        repo = SettingsRepo(conn)
+        repo.set("trans.base_url", url)
+        repo.set("trans.model", "fake")
+        repo.set("tts.base_url", url)
+        repo.set("tts.model", "kokoro")
+
+        page = ModelsPage(conn)
+
+        # LLM test button (translation group)
+        llm_group = page._groups[1]
+        llm_group._test()
+        llm_group._worker.wait()
+        for _ in range(10):
+            qapp.processEvents()
+        assert "✅" in llm_group.status.text()
+        assert "SQLite" not in llm_group.status.text()
+        assert llm_group.test_button.isEnabled()
+
+        # TTS test button
+        tts_group = page._groups[2]
+        tts_group._test()
+        tts_group._worker.wait()
+        for _ in range(10):
+            qapp.processEvents()
+        assert "✅" in tts_group.status.text()
+        assert "SQLite" not in tts_group.status.text()
+        assert tts_group.test_button.isEnabled()
+    finally:
+        server.stop()
+
+
+def test_models_page_test_button_reports_missing_config(qapp, conn):
+    page = ModelsPage(conn)  # nothing configured
+    llm_group = page._groups[0]
+    llm_group._test()
+    assert "❌" in llm_group.status.text()
+    assert "gen.base_url" in llm_group.status.text()
+    assert llm_group.test_button.isEnabled()
+
+
 def test_templates_page_edit_and_save(qapp, conn):
     TemplatesRepo(conn).seed_defaults()
     page = TemplatesPage(conn)

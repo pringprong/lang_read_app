@@ -87,10 +87,13 @@ def test_export_events_incremental(env):
     first = service.export_bundle(env["tmp_path"] / "sync1.zip")
     assert first.events == 0  # no reviews yet
 
-    # a review happens after the first export
+    # a review happens after the first export (clock-independent timestamp)
+    from langread.db import utcnow_iso
+
+    event_time = utcnow_iso()
     srs = SrsService(env["conn"])
     word = WordsRepo(env["conn"]).get_by_text(NEW[0])
-    srs.rate_word(word.id, "easy", env["lesson_id"], now="2026-11-02T00:00:00+00:00")
+    srs.rate_word(word.id, "easy", env["lesson_id"], now=event_time)
 
     second = service.export_bundle(env["tmp_path"] / "sync2.zip")
     assert second.events == 1  # only the new event (since last export)

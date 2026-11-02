@@ -65,10 +65,25 @@ class _LlmGroup(QGroupBox):
 
     def _test(self) -> None:
         self.save()
+        # resolve the config on the UI thread (SQLite connections are
+        # thread-bound); the worker only performs the network call
+        from langread.services.model_settings import ModelSettingsError
+
+        try:
+            config = self.settings.llm_config(self.prefix)
+        except ModelSettingsError as exc:
+            self.status.setText(f"❌ {exc}")
+            return
         self.test_button.setEnabled(False)
         self.status.setText("Testing…")
+        from langread.services.llm_client import LlmClient
+
         self._worker = run_async(
-            lambda: self.settings.test_llm(self.prefix), self._on_test_done, self
+            lambda: LlmClient(config).chat(
+                "Reply with exactly: OK", temperature=0.0
+            ),
+            self._on_test_done,
+            self,
         )
 
     def _on_test_done(self, result, error) -> None:
@@ -134,9 +149,24 @@ class _TtsGroup(QGroupBox):
 
     def _test(self) -> None:
         self.save()
+        # resolve the config on the UI thread (SQLite connections are
+        # thread-bound); the worker only performs the network call
+        from langread.services.model_settings import ModelSettingsError
+
+        try:
+            config = self.settings.tts_config()
+        except ModelSettingsError as exc:
+            self.status.setText(f"❌ {exc}")
+            return
         self.test_button.setEnabled(False)
         self.status.setText("Testing…")
-        self._worker = run_async(self.settings.test_tts, self._on_test_done, self)
+        from langread.services.tts import TtsService
+
+        self._worker = run_async(
+            lambda: len(TtsService(config).synthesize("你好")),
+            self._on_test_done,
+            self,
+        )
 
     def _on_test_done(self, result, error) -> None:
         self.test_button.setEnabled(True)
