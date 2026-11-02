@@ -130,6 +130,12 @@ Environment notes:
 ### Post-M10 fixes
 
 - [x] Settings *Test connection* buttons hit the SQLite thread-affinity error (config was read from the worker thread). Fixed: config resolved on the UI thread; workers only perform network calls. Regression test added against the fake server (167 tests total).
+- [x] TTS layer made format-tolerant (MP3/WAV/OGG/FLAC with proper WAV merging) — future-proof for any OpenAI-compatible speech server (174 tests total).
+- [x] **All three real endpoints configured and verified** (2026-11-02):
+  - gen + trans: LM Studio `http://192.168.1.24:1234/v1` (qwen/qwen3.5-9b) — ~2.5s replies
+  - tts: Kokoro docker `http://192.168.1.24:8880/v1` (model `kokoro-1`) — MP3 in 0.5s
+  - (LM Studio's kokoro-82m GGUF turned out to be unservable — no TTS endpoint in its API; the docker Kokoro was unreachable due to a Windows firewall rule on port 8880, fixed with netsh.)
+- [ ] **User production smoke test**: run one full lesson through create → generate → save → review with the real models.
 
 ## Verdict
 
