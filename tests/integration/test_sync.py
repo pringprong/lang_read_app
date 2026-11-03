@@ -152,15 +152,17 @@ def test_import_results_applies_android_reviews(env):
     word_b = words.get_by_text(NEW[1])       # learned
     word_b_interval_before = word_b.interval_days
 
+    t_rating_a, t_rating_b = _ts(3600), _ts(3601)
+    t_lesson, t_action = _ts(3602), _ts(3603)
     records = [
         {"type": "rating", "lesson_id": env["lesson_id"], "word_id": word_a.id,
-         "rating": "difficult", "reviewed_at": _ts(3600)},
+         "rating": "difficult", "reviewed_at": t_rating_a},
         {"type": "rating", "lesson_id": env["lesson_id"], "word_id": word_b.id,
-         "rating": "unchanged", "reviewed_at": _ts(3601)},
+         "rating": "unchanged", "reviewed_at": t_rating_b},
         {"type": "lesson_reviewed", "lesson_id": env["lesson_id"],
-         "reviewed_at": _ts(3602)},
+         "reviewed_at": t_lesson},
         {"type": "word_action", "word_text": "我们", "action": "add_new",
-         "acted_at": _ts(3603)},
+         "acted_at": t_action},
     ]
     bundle = write_results_bundle(env["tmp_path"] / "results.zip", records)
     stats = _sync(env).import_results(bundle)
@@ -175,12 +177,12 @@ def test_import_results_applies_android_reviews(env):
     # difficult applied with the android timestamp
     word_a_after = words.get_by_text(NEW[0])
     assert word_a_after.interval_days == 0.5
-    assert word_a_after.last_rated_at == _ts(3600)
+    assert word_a_after.last_rated_at == t_rating_a
     # "unchanged" leaves the SRS state alone
     assert words.get_by_text(NEW[1]).interval_days == word_b_interval_before
     # lesson marked reviewed with the android timestamp
     lesson = LessonsRepo(conn).get(env["lesson_id"])
-    assert lesson.last_reviewed_at == _ts(3602)
+    assert lesson.last_reviewed_at == t_lesson
     # word action applied
     assert words.get_by_text("我们").list_state == "new"
     # automatic backup was taken before applying
