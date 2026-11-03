@@ -113,6 +113,10 @@ class LlmClient:
                 response = self._client.chat.completions.create(
                     model=self._config.model,
                     messages=messages,
+                    extra_body={
+                        "reasoning_effort": "none",
+                        "reasoning": "off"
+                    },
                     temperature=self._config.temperature if temperature is None else temperature,
                 )
             except Exception as exc:  # network, auth, model-not-found, timeout…

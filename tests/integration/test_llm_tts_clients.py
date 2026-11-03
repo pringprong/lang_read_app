@@ -9,8 +9,10 @@ from langread.services.tts import (
     TtsConfig,
     TtsError,
     TtsService,
+    _count_mp3_frames,
     _latinize_punctuation,
     _strip_id3,
+    _strip_leading_xing,
     concat_audio,
     detect_audio_format,
     looks_like_mp3,
@@ -141,6 +143,53 @@ def test_latinize_punctuation():
     """English voices ignore CJK punctuation — transliterate for Latin runs."""
     assert _latinize_punctuation("HSK。HSK，") == "HSK. HSK, "
     assert _latinize_punctuation("HSK") == "HSK"
+
+
+# ---- MP3 frame handling (Kokoro-style chunks) ----
+
+_KOKORO_HEADER = b"\xff\xf3\x84\xc0"  # MPEG-2 L3, 64 kbps, 24 kHz, mono
+_KOKORO_FRAME_SIZE = 192               # 72 * 64000 / 24000
+
+
+def _kokoro_frame(marker: bytes = b"") -> bytes:
+    body = bytearray(b"\x00" * (_KOKORO_FRAME_SIZE - 4))
+    if marker:
+        body[9:9 + len(marker)] = marker  # after 9-byte MPEG-2 mono side info
+    return _KOKORO_HEADER + bytes(body)
+
+
+def _kokoro_chunk(audio_frames: int) -> bytes:
+    """ID3 tag + Info frame + N audio frames — like a real Kokoro response."""
+    info = _kokoro_frame(b"Info")
+    audio = _kokoro_frame() * audio_frames
+    return b"ID3\x04\x00\x00\x00\x00\x00\x00" + info + audio
+
+
+def test_concat_audio_builds_single_xing_header():
+    """Concatenated MP3s get ONE Xing header with the true totals; the
+    per-chunk Info frames (which make decoders report an 'invalid
+    concatenated file') are removed."""
+    chunks = [_kokoro_chunk(3), _kokoro_chunk(2)]
+    merged = concat_audio(chunks, "mp3")
+    assert detect_audio_format(merged) == "mp3"
+    # single Xing frame first
+    assert merged[:4] == _KOKORO_HEADER
+    assert merged[13:17] == b"Xing"
+    assert int.from_bytes(merged[21:25], "big") == 5  # 3 + 2 audio frames
+    assert int.from_bytes(merged[25:29], "big") == len(merged)  # exact size
+    # no leftover Info/Xing markers mid-stream
+    assert merged.count(b"Info") == 0
+    assert merged.count(b"Xing") == 1
+
+
+def test_strip_leading_xing_and_count_frames():
+    chunk = _kokoro_chunk(2)
+    stripped = _strip_leading_xing(_strip_id3(chunk))
+    assert stripped == _kokoro_frame() * 2
+    assert _count_mp3_frames(stripped) == 2
+    assert _count_mp3_frames(_kokoro_frame() * 7) == 7
+    # garbage (the fake-server mp3) is not countable → callers fall back
+    assert _count_mp3_frames(make_mp3()[10:]) is None
 
 
 def test_tts_json_error_response_reported(server):

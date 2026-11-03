@@ -183,12 +183,97 @@ def _strip_id3(data: bytes) -> bytes:
     return data
 
 
+# ---- minimal MPEG audio frame parsing (Layer III) ----
+
+_BITRATES_L3_V1 = (0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320)
+_BITRATES_L3_V2 = (0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160)
+_SAMPLERATES = {3: (44100, 48000, 32000), 2: (22050, 24000, 16000),
+                0: (11025, 12000, 8000)}
+
+
+def _parse_mp3_frame(data: bytes, pos: int = 0) -> tuple[int, int] | None:
+    """Parse an MPEG-1/2/2.5 Layer III frame header at `pos`.
+
+    Returns (frame_size, side_info_size) or None if not a valid header.
+    """
+    if pos + 4 > len(data):
+        return None
+    b1, b2, b3 = data[pos + 1], data[pos + 2], data[pos + 3]
+    if data[pos] != 0xFF or (b1 & 0xE0) != 0xE0:
+        return None
+    version = (b1 >> 3) & 3
+    layer = (b1 >> 1) & 3
+    if version not in (3, 2, 0) or layer != 1:
+        return None
+    bitrate_idx = (b2 >> 4) & 0xF
+    samplerate_idx = (b2 >> 2) & 3
+    padding = (b2 >> 1) & 1
+    if bitrate_idx in (0, 15) or samplerate_idx == 3:
+        return None
+    bitrate = (_BITRATES_L3_V1 if version == 3 else _BITRATES_L3_V2)[bitrate_idx] * 1000
+    samplerate = _SAMPLERATES[version][samplerate_idx]
+    divisor = 144 if version == 3 else 72
+    frame_size = divisor * bitrate // samplerate + padding
+    if frame_size <= 4:
+        return None
+    mono = ((b3 >> 6) & 3) == 3
+    side_info = (17 if mono else 32) if version == 3 else (9 if mono else 17)
+    return frame_size, side_info
+
+
+def _strip_leading_xing(data: bytes) -> bytes:
+    """Remove a leading Xing/Info frame (encoders write one per file with
+    that file's frame count — left mid-stream it makes decoders report an
+    'invalid concatenated file')."""
+    parsed = _parse_mp3_frame(data)
+    if parsed is None:
+        return data
+    frame_size, side_info = parsed
+    if len(data) < frame_size:
+        return data
+    if data[4 + side_info:4 + side_info + 4] in (b"Xing", b"Info"):
+        return data[frame_size:]
+    return data
+
+
+def _count_mp3_frames(data: bytes) -> int | None:
+    """Walk the frame stream; None if it is not a clean frame sequence."""
+    count = 0
+    pos = 0
+    while pos < len(data):
+        parsed = _parse_mp3_frame(data, pos)
+        if parsed is None:
+            return None
+        frame_size = parsed[0]
+        if pos + frame_size > len(data):
+            break  # trailing partial frame — ignore
+        count += 1
+        pos += frame_size
+    return count or None
+
+
+def _make_xing_frame(template_header: bytes, frame_count: int,
+                      byte_count: int) -> bytes | None:
+    """Build a Xing header frame (declares total frames/bytes) so decoders
+    get an exact duration instead of estimating and warning."""
+    parsed = _parse_mp3_frame(template_header)
+    if parsed is None:
+        return None
+    frame_size, side_info = parsed
+    body = (b"Xing" + struct.pack(">I", 0x0003)          # frames + bytes
+            + struct.pack(">I", frame_count) + struct.pack(">I", byte_count))
+    frame = template_header[:4] + b"\x00" * side_info + body
+    if len(frame) > frame_size:
+        return None  # frame too small for the tag — skip the header
+    return frame + b"\x00" * (frame_size - len(frame))
+
+
 def concat_audio(chunks: list[bytes], audio_format: str) -> bytes:
     """Concatenate same-format audio chunks into one file's bytes.
 
-    MP3/OGG frames concatenate natively (ID3 tags stripped from each chunk);
-    WAV files must be merged under a single RIFF header with a corrected
-    data size.
+    MP3: ID3 tags and per-chunk Xing/Info frames are stripped, and a single
+    correct Xing header is prepended (exact duration, no decoder warnings).
+    WAV: merged under one RIFF header with a corrected data size.
     """
     if audio_format == "wav":
         fmt, total_data = b"", b""
@@ -202,7 +287,18 @@ def concat_audio(chunks: list[bytes], audio_format: str) -> bytes:
             + fmt + b"data" + struct.pack("<I", len(total_data)) + total_data
         )
     if audio_format == "mp3":
-        return b"".join(_strip_id3(chunk) for chunk in chunks)
+        stream = b"".join(
+            _strip_leading_xing(_strip_id3(chunk)) for chunk in chunks
+        )
+        frame_count = _count_mp3_frames(stream)
+        if frame_count:
+            xing = _make_xing_frame(
+                stream[:4], frame_count,
+                byte_count=len(stream) + _parse_mp3_frame(stream)[0],
+            )
+            if xing is not None:
+                return xing + stream
+        return stream
     return b"".join(chunks)
 
 
