@@ -17,7 +17,8 @@ CREATE TABLE lessons (
                      CHECK (status IN ('draft', 'complete', 'incomplete')),
     audio_path       TEXT,
     created_at       TEXT NOT NULL,
-    last_reviewed_at TEXT
+    last_reviewed_at TEXT,
+    review_count     INTEGER NOT NULL DEFAULT 0   -- completed reviews (v2)
 );
 CREATE INDEX idx_lessons_topic ON lessons(topic_id, order_index);
 CREATE INDEX idx_lessons_status ON lessons(status);

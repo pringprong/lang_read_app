@@ -8,7 +8,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 _SCHEMA_FILE = Path(__file__).parent / "schema.sql"
 
@@ -33,17 +33,33 @@ def connect(db_path: Path | str) -> sqlite3.Connection:
 
 
 def migrate(conn: sqlite3.Connection) -> None:
-    """Apply pending schema migrations (currently: the single v1 schema)."""
+    """Apply pending schema migrations.
+
+    v1: the initial schema (schema.sql).
+    v2: `lessons.review_count` (times-reviewed column in the lesson list).
+    """
     conn.execute(
         "CREATE TABLE IF NOT EXISTS schema_migrations ("
         "version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)"
     )
     applied = {row["version"] for row in conn.execute("SELECT version FROM schema_migrations")}
-    if SCHEMA_VERSION not in applied:
+    if 1 not in applied:
         conn.executescript(_SCHEMA_FILE.read_text(encoding="utf-8"))
         conn.execute(
-            "INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)",
-            (SCHEMA_VERSION, utcnow_iso()),
+            "INSERT INTO schema_migrations (version, applied_at) VALUES (1, ?)",
+            (utcnow_iso(),),
+        )
+    if 2 not in applied:
+        # fresh databases already have the column (schema.sql is kept in
+        # sync); databases created at v1 need the ALTER
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(lessons)")}
+        if "review_count" not in columns:
+            conn.execute(
+                "ALTER TABLE lessons ADD COLUMN review_count INTEGER NOT NULL DEFAULT 0"
+            )
+        conn.execute(
+            "INSERT INTO schema_migrations (version, applied_at) VALUES (2, ?)",
+            (utcnow_iso(),),
         )
 
 

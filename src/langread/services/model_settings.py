@@ -95,3 +95,17 @@ class ModelSettings:
 
         data = TtsService(self.tts_config()).synthesize("你好")
         return len(data)
+
+
+def generation_llm(conn) -> "LlmClient | None":
+    """Sentence-generation client built from stored settings.
+
+    Returns None when the model is not configured; the wizard / generation
+    pipeline then reports the missing configuration to the user.
+    """
+    from langread.services.llm_client import LlmClient
+
+    try:
+        return LlmClient(ModelSettings(SettingsRepo(conn)).llm_config("gen"))
+    except ModelSettingsError:
+        return None

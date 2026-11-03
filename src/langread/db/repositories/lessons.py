@@ -24,6 +24,7 @@ class LessonsRepo:
             audio_path=row["audio_path"],
             created_at=row["created_at"],
             last_reviewed_at=row["last_reviewed_at"],
+            review_count=row["review_count"],
         )
 
     def create(self, topic_id: int, title: str | None = None,
@@ -84,9 +85,11 @@ class LessonsRepo:
             )
 
     def mark_reviewed(self, lesson_id: int, reviewed_at: str | None = None) -> None:
+        """Record a completed review: timestamp + review_count (schema v2)."""
         with transaction(self.conn):
             self.conn.execute(
-                "UPDATE lessons SET last_reviewed_at = ? WHERE id = ?",
+                "UPDATE lessons SET last_reviewed_at = ?, "
+                "review_count = review_count + 1 WHERE id = ?",
                 (reviewed_at or utcnow_iso(), lesson_id),
             )
 

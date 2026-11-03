@@ -229,6 +229,42 @@ class LessonSaver:
         assert result is not None
         return result
 
+    # ---- lesson deletion ----
+
+    def delete_lesson(self, lesson_id: int) -> list[str]:
+        """Delete a lesson — only the LAST one in its topic (D-lesson delete).
+
+        Reverses the word promotion of §7.9.3: this lesson's new words move
+        back to the New list. Sentences, lesson_words and review events are
+        removed via FK cascade; the audio file is deleted from disk.
+
+        Returns the texts of the words moved back to the New list.
+        """
+        lesson = self.lessons.get(lesson_id)
+        if lesson is None:
+            raise SaveError(f"lesson {lesson_id} does not exist")
+        topic_lessons = self.lessons.list_for_topic(lesson.topic_id)
+        if topic_lessons and topic_lessons[-1].id != lesson_id:
+            raise SaveError(
+                "only the last lesson in a topic can be deleted — earlier "
+                "lessons may reuse this lesson's words"
+            )
+        demoted: list[str] = []
+        for _lid, word_id, role in self.lessons.lesson_words(lesson_id):
+            if role != "new":
+                continue  # review words existed before this lesson
+            word = self.words.get(word_id)
+            if word is None or word.list_state != "learned":
+                continue  # never promoted (incomplete) or moved elsewhere
+            self.words.move_to_state(word_id, "new")
+            demoted.append(word.text)
+        for suffix in (".mp3", ".wav", ".ogg", ".flac"):
+            candidate = self._audio_dir / f"lesson_{lesson_id}{suffix}"
+            if candidate.exists():
+                candidate.unlink()
+        self.lessons.delete(lesson_id)
+        return demoted
+
     def _paragraph_texts(self, lesson_id: int) -> list[str]:
         sentences = self.sentences.list_for_lesson(lesson_id)
         paragraphs: dict[int, list[str]] = {}

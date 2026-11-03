@@ -23,6 +23,7 @@ class Lesson:
     audio_path: str | None
     created_at: str
     last_reviewed_at: str | None
+    review_count: int = 0  # number of completed reviews (schema v2)
 
 
 @dataclass(frozen=True)

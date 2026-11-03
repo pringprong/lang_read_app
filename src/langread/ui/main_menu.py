@@ -8,7 +8,6 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QLabel,
     QMainWindow,
-    QMessageBox,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -17,15 +16,15 @@ from PySide6.QtWidgets import (
 from langread.app_config import db_path
 from langread.db import connect
 
-MENU_ITEMS: list[tuple[str, str, int]] = [
-    ("Review a lesson", "Select a topic and review a lesson in that topic.", 0),
-    ("Create a new topic", "Create a new topic and start a new chain of lessons.", 1),
-    ("Create a new lesson", "Create a new lesson in an existing topic.", 2),
-    ("Add new words", "Add words to the new word list (paste, manual, HSK).", 3),
-    ("Manage word lists", "Review the new / learned / basic / HSK word lists.", 4),
-    ("Model settings", "Prompt templates, model URLs, and API keys.", 5),
-    ("SRS settings", "Spaced-repetition algorithm parameters.", 6),
-    ("Sync with Android", "Export / import sync bundles over USB.", 7),
+MENU_ITEMS: list[tuple[str, str, str]] = [
+    ("Manage lessons", "Select a topic; review, create, edit or delete its lessons.", "lessons"),
+    ("Manage topics", "Create, rename or delete topics.", "topics"),
+    ("Add new words", "Add words to the new word list (paste, manual, HSK).", "words_add"),
+    ("Manage word lists", "Review the new / learned / basic / HSK word lists.", "words_lists"),
+    ("Model settings", "Prompt templates, model URLs, and API keys.", "settings_models"),
+    ("SRS settings", "Spaced-repetition algorithm parameters.", "settings_srs"),
+    ("Sync with Android", "Export / import sync bundles over USB.", "sync"),
+    ("Quit", "Close LangRead.", "quit"),
 ]
 
 
@@ -51,10 +50,10 @@ class MainMenu(QMainWindow):
         layout.addWidget(subtitle)
         layout.addSpacing(12)
 
-        for label, tooltip, index in MENU_ITEMS:
+        for label, tooltip, action in MENU_ITEMS:
             button = QPushButton(label)
             button.setToolTip(tooltip)
-            button.clicked.connect(lambda _=False, i=index: self._on_menu(i))
+            button.clicked.connect(lambda _=False, a=action: self._on_menu(a))
             layout.addWidget(button)
 
         self.setCentralWidget(central)
@@ -75,107 +74,37 @@ class MainMenu(QMainWindow):
 
     # ---- menu dispatch ----
 
-    def _on_menu(self, index: int) -> None:
-        if index == 5:
-            self._open_settings(initial_tab=0)
-        elif index == 6:
-            self._open_settings(initial_tab=2)
-        elif index == 0:
+    def _on_menu(self, action: str) -> None:
+        if action == "quit":
+            self.close()  # last window closed → the app exits
+        elif action == "lessons":
             from langread.ui.topic_lesson_list import LessonListDialog
 
             LessonListDialog(self.conn(), db_path=db_path(), parent=self).exec()
-        elif index == 3:
+        elif action == "topics":
+            from langread.ui.topics_manager import TopicsManagerDialog
+
+            TopicsManagerDialog(self.conn(), parent=self).exec()
+        elif action == "words_add":
             from langread.ui.words.add_words import AddWordsDialog
 
             AddWordsDialog(self.conn(), parent=self).exec()
-        elif index == 4:
+        elif action == "words_lists":
             from langread.ui.words.list_manager import WordListManager
 
             WordListManager(self.conn(), parent=self).exec()
-        elif index == 1:
-            self._create_topic()
-        elif index == 2:
-            self._create_lesson()
-        elif index == 7:
+        elif action == "settings_models":
+            self._open_settings(initial_tab=0)
+        elif action == "settings_srs":
+            self._open_settings(initial_tab=2)
+        elif action == "sync":
             from langread.ui.sync_page import SyncPage
 
             SyncPage(self.conn(), db_path=db_path(), parent=self).exec()
-        else:
-            self._not_implemented()
-
-    # ---- topic / lesson creation (§7.1) ----
-
-    def _create_topic(self) -> None:
-        import sqlite3
-
-        from PySide6.QtWidgets import QInputDialog
-
-        from langread.db.repositories import TopicsRepo
-
-        name, ok = QInputDialog.getText(self, "New topic", "Topic name:")
-        if not ok or not name.strip():
-            return
-        try:
-            topic = TopicsRepo(self.conn()).create(name.strip())
-        except sqlite3.IntegrityError:
-            QMessageBox.warning(self, "Duplicate topic", "That topic already exists.")
-            return
-        QMessageBox.information(
-            self, "Topic created",
-            f"Topic “{topic.name}” created. You can now create lessons in it.",
-        )
-
-    def _create_lesson(self) -> None:
-        from PySide6.QtWidgets import QInputDialog
-
-        from langread.db.repositories import TopicsRepo
-        from langread.ui.lesson_create.wizard import LessonWizard
-
-        topics = TopicsRepo(self.conn()).list_all()
-        if not topics:
-            QMessageBox.information(
-                self, "No topics",
-                "Create a topic first (menu option “Create a new topic”).",
-            )
-            return
-        names = [t.name for t in topics]
-        name, ok = QInputDialog.getItem(
-            self, "Create a new lesson", "Topic:", names, 0, False
-        )
-        if not ok:
-            return
-        topic = TopicsRepo(self.conn()).get_by_name(name)
-        if topic is None:
-            return
-        llm = self._generation_llm()
-        wizard = LessonWizard(self.conn(), topic.id, topic.name, llm=llm,
-                              db_path=db_path(), parent=self)
-        wizard.exec()
-
-    def _generation_llm(self):
-        from langread.db.repositories import SettingsRepo
-        from langread.services.llm_client import LlmClient
-        from langread.services.model_settings import (
-            ModelSettings,
-            ModelSettingsError,
-        )
-
-        try:
-            return LlmClient(ModelSettings(SettingsRepo(self.conn())).llm_config("gen"))
-        except ModelSettingsError:
-            return None  # wizard/generation reports the missing configuration
 
     def _open_settings(self, initial_tab: int) -> None:
         from langread.ui.settings_dialog import SettingsDialog
 
         dialog = SettingsDialog(self.conn(), parent=self, initial_tab=initial_tab)
         dialog.exec()
-
-    def _not_implemented(self) -> None:
-        QMessageBox.information(
-            self,
-            "Not implemented yet",
-            "This feature is not implemented yet. See the milestone plan "
-            "(20261101_desktop_app_plan.md).",
-        )
 

@@ -35,18 +35,23 @@ QT_QPA_PLATFORM=offscreen .venv/bin/pytest
    `http://<host>:1234/v1`), **translation** model, and **TTS** server
    (Kokoro, e.g. `http://<host>:8880/v1`), plus model names and a Chinese
    voice. Press *Test connection* on each.
-2. **Create a new topic** (e.g. “Cooking”).
+2. **Create a new topic** (menu → *Manage topics* → *New topic…*; topics can
+   be renamed, and empty topics deleted, from the same window).
 3. **Add words**: paste Chinese text (tick the words that are new to you —
    the rest go to the Basic list), enter words one by one, or bulk-add from
    the bundled **HSK 1–6 lists** (4,991 words with pinyin and definitions).
-4. **Create a new lesson** in the topic: accept or change the suggested
+4. **Create a new lesson**: menu → *Manage lessons* → pick the topic →
+   *New lesson…*: accept or change the suggested
    words, generate paragraph by paragraph, hand-edit the text or word
    segmentation if needed, then **Approve & save** (audio, translations and
    word promotion happen automatically; an interrupted save can be resumed).
-5. **Review a lesson**: read along while the audio plays (speed control,
+5. **Review a lesson** (*Manage lessons* → *Review lesson*): read along while
+   the audio plays (speed control,
    ±15s), tap any word for pinyin/definition/list status, toggle sentence
    translations, then rate the words (difficult/easy/standard/unchanged) to
-   drive the spaced repetition.
+   drive the spaced repetition. *Manage lessons* also lets you edit a
+   lesson's text, regenerate its audio, and delete the last lesson of a
+   topic (its new words return to the New list).
 6. **Sync with Android**: export a sync bundle and copy it to the phone over
    USB; import the phone's results bundle back (verified + auto-backup).
 
@@ -79,7 +84,7 @@ templates, imports the HSK dataset, and exits 0 on success.
 ## Testing
 
 ```bash
-QT_QPA_PLATFORM=offscreen .venv/bin/pytest    # 165 tests
+QT_QPA_PLATFORM=offscreen .venv/bin/pytest    # 201 tests
 ```
 
 Unit and integration tests cover the SRS engine, segmentation, generation

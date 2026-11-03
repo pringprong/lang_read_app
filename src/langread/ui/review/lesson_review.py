@@ -205,7 +205,7 @@ class LessonReviewWindow(QDialog):
         self.text_browser.document().setDefaultStyleSheet(self._stylesheet())
         parts: list[str] = []
         current_para = None
-        for sentence in self._sentences:
+        for index, sentence in enumerate(self._sentences):
             if current_para is not None and sentence.para_index != current_para:
                 parts.append("<br><br>")
             current_para = sentence.para_index
@@ -232,9 +232,21 @@ class LessonReviewWindow(QDialog):
                 toggle = f' <a class="tr" href="tr:{sentence.id}">{label}</a>&nbsp;&nbsp; '
             translation_html = ""
             if sentence.id in self._revealed and sentence.translation:
+                # §8.4: a line break after the translation keeps space around
+                # the translated text before the next sentence starts
+                next_sentence = (
+                    self._sentences[index + 1]
+                    if index + 1 < len(self._sentences) else None
+                )
+                trailing = (
+                    "<br>"
+                    if next_sentence is not None
+                    and next_sentence.para_index == sentence.para_index
+                    else ""
+                )
                 translation_html = (
                     '<br><span class="translation">'
-                    f"{html.escape(sentence.translation)}</span>"
+                    f"{html.escape(sentence.translation)}</span>{trailing}"
                 )
             parts.append(f"<span>{sentence_html}{toggle}{translation_html}</span>")
         rendered = "".join(parts)
