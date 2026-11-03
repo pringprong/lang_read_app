@@ -22,6 +22,11 @@ def make_wav(num_samples: int = 100) -> bytes:
     return riff + fmt + data
 
 
+def make_mp3() -> bytes:
+    """A minimal 'MP3': ID3v2 header (size 0) + an MPEG frame sync + zeros."""
+    return b"ID3\x04\x00\x00\x00\x00\x00\x00" + b"\xff\xfb" + b"\x00" * 62
+
+
 class FakeOpenAiServer:
     def __init__(self) -> None:
         self.chat_calls: list[dict] = []
@@ -98,7 +103,7 @@ class FakeOpenAiServer:
                     elif wav:
                         data = make_wav()
                     else:
-                        data = b"ID3" + b"\x00" * 64
+                        data = make_mp3()
                     self._send(200, data, "audio/mpeg")
                 else:
                     self._send(404, {"error": "not found"}, "application/json")

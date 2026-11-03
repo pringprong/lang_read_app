@@ -29,7 +29,9 @@ class TtsStub:
         self.calls.append(text)
         if len(self.calls) in self.fail_on_calls:
             raise RuntimeError("tts is down")
-        return b"ID3" + b"\x00" * 16
+        from tests.fakes.openai_server import make_mp3
+
+        return make_mp3()
 
 
 class TranslationStub:

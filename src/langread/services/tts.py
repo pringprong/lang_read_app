@@ -153,11 +153,42 @@ def _parse_wav(data: bytes) -> tuple[bytes, bytes]:
     return fmt, payload
 
 
+# CJK punctuation transliterated for Latin (English-voice) segments —
+# English voices ignore CJK punctuation, so periods would vanish silently.
+_CJK_TO_ASCII_PUNCT = {
+    "。": ". ", "！": "! ", "？": "? ", "，": ", ", "、": ", ",
+    "：": ": ", "；": "; ", "（": " (", "）": ") ",
+    "“": '"', "”": '"', "‘": "'", "’": "'",
+}
+
+
+def _latinize_punctuation(text: str) -> str:
+    return "".join(_CJK_TO_ASCII_PUNCT.get(ch, ch) for ch in text)
+
+
+def _strip_id3(data: bytes) -> bytes:
+    """Remove a leading ID3v2 tag and trailing ID3v1 tag (raw frames remain).
+
+    Concatenating whole MP3 files leaves ID3 tags mid-stream, which makes
+    decoders log 'Header missing' warnings at every join.
+    """
+    if data[:3] == b"ID3" and len(data) >= 10:
+        size = ((data[6] & 0x7F) << 21) | ((data[7] & 0x7F) << 14) | (
+            (data[8] & 0x7F) << 7
+        ) | (data[9] & 0x7F)
+        footer = 10 if (data[5] & 0x10) else 0
+        data = data[10 + size + footer:]
+    if len(data) > 128 and data[-128:-125] == b"TAG":
+        data = data[:-128]
+    return data
+
+
 def concat_audio(chunks: list[bytes], audio_format: str) -> bytes:
     """Concatenate same-format audio chunks into one file's bytes.
 
-    MP3/OGG frames concatenate natively; WAV files must be merged under a
-    single RIFF header with a corrected data size.
+    MP3/OGG frames concatenate natively (ID3 tags stripped from each chunk);
+    WAV files must be merged under a single RIFF header with a corrected
+    data size.
     """
     if audio_format == "wav":
         fmt, total_data = b"", b""
@@ -170,6 +201,8 @@ def concat_audio(chunks: list[bytes], audio_format: str) -> bytes:
             b"RIFF" + struct.pack("<I", riff_size) + b"WAVE"
             + fmt + b"data" + struct.pack("<I", len(total_data)) + total_data
         )
+    if audio_format == "mp3":
+        return b"".join(_strip_id3(chunk) for chunk in chunks)
     return b"".join(chunks)
 
 
@@ -206,6 +239,10 @@ class TtsService:
         chunks: list[bytes] = []
         for segment, kind in segments:
             voice = latin_voice if kind == "latin" else self._config.voice
+            if kind == "latin":
+                # English voices ignore CJK punctuation — transliterate so
+                # sentence periods still produce audible pauses
+                segment = _latinize_punctuation(segment)
             chunks.append(self._synthesize_segment(segment, voice))
         audio_format = detect_audio_format(chunks[0])
         return concat_audio(chunks, audio_format)

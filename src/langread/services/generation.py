@@ -85,6 +85,7 @@ class GenerationService:
         self.conn = conn
         self.llm = llm  # any object with .chat(prompt) -> str (LlmClient in prod)
         self.templates = TemplatesRepo(conn)
+        self.templates.seed_defaults()  # adds any newly introduced templates
         self.topics = TopicsRepo(conn)
         self.words = WordsRepo(conn)
         self.segmentation = SegmentationService(conn)
@@ -148,13 +149,25 @@ class GenerationService:
                 "topic_name": topic_name,
                 "all_new_words": "、".join(plan.all_new_words),
             })
-        else:
+        elif plan.first_use:
             template = self.templates.get("generate_paragraph")
             if not template:
                 raise GenerationError("missing template: generate_paragraph")
             prompt = fill_template(template, {
                 "topic_name": topic_name,
-                "new_word": plan.first_use or "（本段没有新词）",
+                "new_word": plan.first_use,
+                "repeat_words": "、".join(plan.repeat_words) or "（无）",
+                "review_words": "、".join(plan.review_words) or "（无）",
+            })
+        else:
+            # paragraphs without a first-use word use a dedicated template so
+            # no placeholder text leaks into the lesson
+            template = (self.templates.get("generate_paragraph_no_new")
+                        or self.templates.get("generate_paragraph"))
+            if not template:
+                raise GenerationError("missing template: generate_paragraph_no_new")
+            prompt = fill_template(template, {
+                "topic_name": topic_name,
                 "repeat_words": "、".join(plan.repeat_words) or "（无）",
                 "review_words": "、".join(plan.review_words) or "（无）",
             })

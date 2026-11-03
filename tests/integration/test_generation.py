@@ -61,6 +61,10 @@ def conn(tmp_path):
         "generate_paragraph",
         "WORDS: new={new_word}; repeat={repeat_words}; review={review_words}; topic={topic_name}",
     )
+    TemplatesRepo(conn).upsert(
+        "generate_paragraph_no_new",
+        "WORDS-NO-NEW: repeat={repeat_words}; review={review_words}; topic={topic_name}",
+    )
     TemplatesRepo(conn).upsert("generate_final_paragraph", "FINAL: {all_new_words}")
     topic = TopicsRepo(conn).create("Cooking")
     words = WordsRepo(conn)
@@ -101,6 +105,11 @@ def test_generate_lesson_structure(conn, service):
     # first five paragraphs introduce one new word each
     for i in range(5):
         assert NEW[i] in draft.paragraphs[i].used_words
+    # paragraphs without a first-use word use the dedicated template —
+    # no placeholder text like （本段没有新词） leaks into the lesson
+    for i in (5, 6):
+        assert service.llm.calls[i].startswith("WORDS-NO-NEW")
+        assert "（本段没有新词）" not in draft.paragraphs[i].text
     # final paragraph uses ALL new words, none first-introduced
     final = draft.paragraphs[7]
     assert set(NEW) <= set(final.used_words)

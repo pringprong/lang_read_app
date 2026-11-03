@@ -37,6 +37,10 @@ def conn(tmp_path):
         "generate_paragraph",
         "WORDS: new={new_word}; repeat={repeat_words}; review={review_words}; topic={topic_name}",
     )
+    TemplatesRepo(conn).upsert(
+        "generate_paragraph_no_new",
+        "WORDS-NO-NEW: repeat={repeat_words}; review={review_words}; topic={topic_name}",
+    )
     TemplatesRepo(conn).upsert("generate_final_paragraph", "FINAL: {all_new_words}")
     topic = TopicsRepo(conn).create("Cooking")
     for text in NEW:

@@ -9,6 +9,8 @@ from langread.services.tts import (
     TtsConfig,
     TtsError,
     TtsService,
+    _latinize_punctuation,
+    _strip_id3,
     concat_audio,
     detect_audio_format,
     looks_like_mp3,
@@ -16,7 +18,7 @@ from langread.services.tts import (
     split_by_script,
 )
 
-from tests.fakes.openai_server import FakeOpenAiServer, make_wav
+from tests.fakes.openai_server import FakeOpenAiServer, make_mp3, make_wav
 
 
 @pytest.fixture()
@@ -116,8 +118,29 @@ def test_concat_audio_wav_merge():
 
 
 def test_concat_audio_mp3_join():
-    chunks = [b"ID3" + b"a" * 10, b"\xff\xfb" + b"b" * 10]
-    assert concat_audio(chunks, "mp3") == b"".join(chunks)
+    """MP3 chunks are concatenated with ID3 tags stripped — tags left
+    mid-stream cause decoder 'Header missing' warnings at every join."""
+    chunk = make_mp3()
+    merged = concat_audio([chunk, chunk], "mp3")
+    assert merged == (b"\xff\xfb" + b"\x00" * 62) * 2
+    assert detect_audio_format(merged) == "mp3"
+
+
+def test_strip_id3():
+    tagged = (b"ID3\x04\x00\x00"          # ID3v2.4 header, no flags
+              + b"\x00\x00\x00\x02"       # syncsafe tag size = 2
+              + b"xx"                     # 2 bytes of tag body
+              + b"\xff\xfb" + b"f" * 10   # MPEG frames
+              + b"TAG" + b"t" * 125)      # ID3v1 trailer
+    assert _strip_id3(tagged) == b"\xff\xfb" + b"f" * 10
+    # data without tags passes through unchanged
+    assert _strip_id3(b"\xff\xfbdata") == b"\xff\xfbdata"
+
+
+def test_latinize_punctuation():
+    """English voices ignore CJK punctuation — transliterate for Latin runs."""
+    assert _latinize_punctuation("HSK。HSK，") == "HSK. HSK, "
+    assert _latinize_punctuation("HSK") == "HSK"
 
 
 def test_tts_json_error_response_reported(server):
@@ -209,7 +232,9 @@ def test_tts_mixed_text_never_sends_punctuation_only(server):
     inputs = [call["input"] for call in server.speech_calls]
     voices = [call["voice"] for call in server.speech_calls]
     assert "。" not in inputs  # no punctuation-only request
-    assert inputs == ["我在学习", "HSK。"]
+    # the trailing 。 merged into the latin run is transliterated so the
+    # English voice still produces a pause
+    assert inputs == ["我在学习", "HSK. "]
     assert voices == ["zf_xiaobei", "af_heart"]
 
 

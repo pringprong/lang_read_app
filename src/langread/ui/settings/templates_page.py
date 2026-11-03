@@ -23,6 +23,9 @@ TEMPLATE_PLACEHOLDERS: dict[str, list[str]] = {
     "generate_paragraph": [
         "{topic_name}", "{new_word}", "{repeat_words}", "{review_words}",
     ],
+    "generate_paragraph_no_new": [
+        "{topic_name}", "{repeat_words}", "{review_words}",
+    ],
     "generate_sentence": [
         "{topic_name}", "{new_word}", "{repeat_words}", "{review_words}",
     ],
