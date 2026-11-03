@@ -302,6 +302,7 @@ class LessonReviewWindow(QDialog):
     def _complete_review(self, open_next: bool) -> None:
         from PySide6.QtWidgets import QMessageBox
 
+        self.audio_bar.stop()  # never keep playing into the next lesson
         ratings = self.review_page.ratings()
         for word_id, rating in ratings.items():
             self.srs.rate_word(word_id, rating, self.lesson.id, device="desktop")
@@ -324,6 +325,20 @@ class LessonReviewWindow(QDialog):
             if index + 1 < len(ids):
                 return lessons[index + 1]
         return None
+
+    # ---- closing always stops playback ----
+
+    def reject(self) -> None:
+        self.audio_bar.stop()  # Cancel review (§8.7): no audio keeps playing
+        super().reject()
+
+    def accept(self) -> None:
+        self.audio_bar.stop()
+        super().accept()
+
+    def closeEvent(self, event) -> None:  # noqa: N802 (Qt naming)
+        self.audio_bar.stop()
+        super().closeEvent(event)
 
 
 class _WordReviewPage(QWidget):

@@ -114,6 +114,12 @@ class AudioBar(QWidget):
             self._player.stop()
         self.play_button.setText("▶ Play")
 
+    def stop(self) -> None:
+        """Stop playback (used when the review window closes by any path)."""
+        if self._player is not None:
+            self._player.stop()
+        self.play_button.setText("▶ Play")
+
     def _on_status(self, status) -> None:
         from PySide6.QtMultimedia import QMediaPlayer
 

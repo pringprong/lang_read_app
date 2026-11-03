@@ -273,6 +273,29 @@ def test_word_review_button_enters_word_review(qapp, env):
     window.close()
 
 
+def test_cancel_review_stops_playback(qapp, env, monkeypatch):
+    """Cancel review must stop the audio player (§8.7)."""
+    conn, _topic, lesson_id = env
+    window = LessonReviewWindow(conn, lesson_id)
+    stopped = []
+    player = window.audio_bar.player()
+    assert player is not None  # the env lesson has a real audio file
+    monkeypatch.setattr(player, "stop", lambda: stopped.append(1))
+    window.reject()
+    assert stopped == [1]
+    # completion stops playback too
+    window2 = LessonReviewWindow(conn, lesson_id)
+    stopped2 = []
+    monkeypatch.setattr(window2.audio_bar.player(), "stop",
+                        lambda: stopped2.append(1))
+    monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: None)
+    window2._complete_review(open_next=False)
+    # stopped at completion start AND via accept() — idempotent, both fine
+    assert len(stopped2) >= 1
+    window2.close()
+    window.close()
+
+
 def test_dark_mode_renders_light_text(qapp, env):
     """Palette-aware stylesheet: dark palette → light text color in CSS."""
     from PySide6.QtGui import QColor, QPalette
