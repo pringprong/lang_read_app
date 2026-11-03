@@ -75,6 +75,42 @@ def split_by_script(text: str) -> list[tuple[str, str]]:
     return [part for part in parts if part[0].strip()]
 
 
+# characters a TTS engine can actually voice
+_SPEAKABLE_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaffA-Za-z0-9]")
+
+
+def _is_speakable(ch: str) -> bool:
+    return bool(_SPEAKABLE_RE.match(ch))
+
+
+def merge_unspeakable(segments: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    """Merge punctuation-only segments into a neighbor and combine adjacent
+    same-kind segments.
+
+    Some TTS servers reject input that contains no speakable characters
+    (e.g. a lone '。' between two Latin runs) with a 500 error.
+    """
+    result: list[list[str]] = []  # mutable [text, kind]
+    pending = ""
+    for text, kind in segments:
+        if not any(_is_speakable(ch) for ch in text):
+            pending += text  # nothing speakable → attach to a neighbor
+            continue
+        if pending:
+            if result:
+                result[-1][0] += pending  # attach to the previous segment
+            else:
+                text = pending + text     # leading punctuation → next segment
+            pending = ""
+        if result and result[-1][1] == kind:
+            result[-1][0] += text         # combine adjacent same-kind runs
+        else:
+            result.append([text, kind])
+    if pending and result:
+        result[-1][0] += pending
+    return [(text, kind) for text, kind in result]
+
+
 def detect_audio_format(data: bytes) -> str | None:
     """Identify common audio formats by header. Returns 'mp3', 'wav',
     'ogg', or 'flac' — None for anything else."""
@@ -154,10 +190,17 @@ class TtsService:
         Chinese runs with the main voice, Latin runs with `latin_voice` —
         and spliced back together in order.
         """
-        segments = split_by_script(text)
+        segments = merge_unspeakable(split_by_script(text))
         has_latin = any(kind == "latin" for _seg, kind in segments)
         latin_voice = (self._config.latin_voice or "").strip()
         if not has_latin or not latin_voice:
+            # single call with the whole text (pure Chinese or no latin voice)
+            speakable = any(_is_speakable(ch) for ch in text)
+            if not speakable:
+                raise TtsError(
+                    "text contains no speakable characters "
+                    f"(mp3/wav voices need letters): {text!r}"
+                )
             return self._synthesize_segment(text, self._config.voice)
 
         chunks: list[bytes] = []

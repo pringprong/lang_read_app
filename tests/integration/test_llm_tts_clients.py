@@ -12,6 +12,7 @@ from langread.services.tts import (
     concat_audio,
     detect_audio_format,
     looks_like_mp3,
+    merge_unspeakable,
     split_by_script,
 )
 
@@ -179,6 +180,37 @@ def test_tts_mixed_text_without_latin_voice_skips(server):
     service.synthesize("我要考HSK考试。")
     assert len(server.speech_calls) == 1
     assert server.speech_calls[0]["voice"] == "zf_xiaobei"
+
+
+def test_merge_unspeakable():
+    """A lone '。' between two Latin runs merges into a neighbor — some TTS
+    servers 500 on punctuation-only input."""
+    segments = split_by_script("我在学习HSK。HSK的内容很丰富。")
+    assert ("。", "zh") in segments  # the problem segment exists pre-merge
+    merged = merge_unspeakable(segments)
+    # no punctuation-only segments remain
+    for text, _kind in merged:
+        assert any(ch.isalnum() or "\u4e00" <= ch <= "\u9fff" for ch in text)
+    # adjacent same-kind runs are combined
+    kinds = [kind for _t, kind in merged]
+    assert kinds == ["zh", "latin", "zh"]
+    assert merged[1][0] == "HSK。HSK"
+    # leading punctuation attaches forward
+    assert merge_unspeakable([("。", "zh"), ("你好", "zh")]) == [("。你好", "zh")]
+
+
+def test_tts_mixed_text_never_sends_punctuation_only(server):
+    """Regression: the 500 from a punctuation-only request (lone '。')."""
+    service = TtsService(
+        TtsConfig(base_url=server.base_url, model="kokoro",
+                  voice="zf_xiaobei", latin_voice="af_heart")
+    )
+    service.synthesize("我在学习HSK。")
+    inputs = [call["input"] for call in server.speech_calls]
+    voices = [call["voice"] for call in server.speech_calls]
+    assert "。" not in inputs  # no punctuation-only request
+    assert inputs == ["我在学习", "HSK。"]
+    assert voices == ["zf_xiaobei", "af_heart"]
 
 
 # ---- extract_json unit cases ----

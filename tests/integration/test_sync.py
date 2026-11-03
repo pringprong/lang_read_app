@@ -4,8 +4,15 @@ from __future__ import annotations
 
 import json
 import zipfile
+from datetime import datetime, timedelta, timezone
 
 import pytest
+
+
+def _ts(offset_seconds: int) -> str:
+    """A timestamp `offset_seconds` from now (clock-independent tests)."""
+    return (datetime.now(timezone.utc)
+            + timedelta(seconds=offset_seconds)).isoformat()
 
 from langread.db import connect
 from langread.db.repositories import LessonsRepo, TemplatesRepo, TopicsRepo, WordsRepo
@@ -147,13 +154,13 @@ def test_import_results_applies_android_reviews(env):
 
     records = [
         {"type": "rating", "lesson_id": env["lesson_id"], "word_id": word_a.id,
-         "rating": "difficult", "reviewed_at": "2026-11-03T10:00:00+00:00"},
+         "rating": "difficult", "reviewed_at": _ts(3600)},
         {"type": "rating", "lesson_id": env["lesson_id"], "word_id": word_b.id,
-         "rating": "unchanged", "reviewed_at": "2026-11-03T10:00:01+00:00"},
+         "rating": "unchanged", "reviewed_at": _ts(3601)},
         {"type": "lesson_reviewed", "lesson_id": env["lesson_id"],
-         "reviewed_at": "2026-11-03T10:00:02+00:00"},
+         "reviewed_at": _ts(3602)},
         {"type": "word_action", "word_text": "我们", "action": "add_new",
-         "acted_at": "2026-11-03T10:00:03+00:00"},
+         "acted_at": _ts(3603)},
     ]
     bundle = write_results_bundle(env["tmp_path"] / "results.zip", records)
     stats = _sync(env).import_results(bundle)
@@ -168,12 +175,12 @@ def test_import_results_applies_android_reviews(env):
     # difficult applied with the android timestamp
     word_a_after = words.get_by_text(NEW[0])
     assert word_a_after.interval_days == 0.5
-    assert word_a_after.last_rated_at == "2026-11-03T10:00:00+00:00"
+    assert word_a_after.last_rated_at == _ts(3600)
     # "unchanged" leaves the SRS state alone
     assert words.get_by_text(NEW[1]).interval_days == word_b_interval_before
     # lesson marked reviewed with the android timestamp
     lesson = LessonsRepo(conn).get(env["lesson_id"])
-    assert lesson.last_reviewed_at == "2026-11-03T10:00:02+00:00"
+    assert lesson.last_reviewed_at == _ts(3602)
     # word action applied
     assert words.get_by_text("我们").list_state == "new"
     # automatic backup was taken before applying
@@ -187,13 +194,12 @@ def test_import_most_recent_wins(env):
     srs = SrsService(conn)
     word = words.get_by_text(NEW[0])
     # desktop rating is NEWER than the android event → android rating skipped
-    srs.rate_word(word.id, "easy", env["lesson_id"],
-                  now="2026-11-10T00:00:00+00:00")
+    srs.rate_word(word.id, "easy", env["lesson_id"], now=_ts(7200))
     interval_after_desktop = words.get_by_text(word.text).interval_days
 
     records = [
         {"type": "rating", "lesson_id": env["lesson_id"], "word_id": word.id,
-         "rating": "difficult", "reviewed_at": "2026-11-03T00:00:00+00:00"},
+         "rating": "difficult", "reviewed_at": _ts(3600)},
     ]
     bundle = write_results_bundle(env["tmp_path"] / "results.zip", records)
     stats = _sync(env).import_results(bundle)
