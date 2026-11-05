@@ -336,3 +336,45 @@ def test_translation_toggle_spacing(qapp, env):
     assert '<a class="tr" href="tr:' in html_text
     window.close()
 
+
+def test_font_size_buttons_persist(qapp, env):
+    """A− / A+ change the reading text size and the choice is remembered."""
+    from langread.db.repositories import SettingsRepo
+    from langread.ui.review.lesson_review import (
+        FONT_MAX,
+        FONT_MIN,
+        FONT_SETTINGS_KEY,
+    )
+
+    conn, _topic, lesson_id = env
+    window = LessonReviewWindow(conn, lesson_id)
+    initial = window._font_pt
+    assert window.text_browser.font().pointSize() == initial
+
+    # increase → bigger font, stored in the settings table
+    window.font_increase_button.click()
+    assert window._font_pt == initial + 2
+    assert window.text_browser.font().pointSize() == initial + 2
+    assert SettingsRepo(conn).get(FONT_SETTINGS_KEY) == initial + 2
+
+    # a fresh window starts at the stored size
+    window2 = LessonReviewWindow(conn, lesson_id)
+    assert window2._font_pt == initial + 2
+
+    # decrease persists too (stepping back down to the original size)
+    window2.font_decrease_button.click()
+    assert window2._font_pt == initial
+    assert SettingsRepo(conn).get(FONT_SETTINGS_KEY) == initial
+
+    # clamped at the bounds
+    window3 = LessonReviewWindow(conn, lesson_id)
+    for _ in range(30):
+        window3.font_decrease_button.click()
+    assert window3._font_pt == FONT_MIN
+    for _ in range(30):
+        window3.font_increase_button.click()
+    assert window3._font_pt == FONT_MAX
+    window.close()
+    window2.close()
+    window3.close()
+

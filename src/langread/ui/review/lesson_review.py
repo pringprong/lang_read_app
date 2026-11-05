@@ -27,12 +27,23 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from langread.db.repositories import HskRepo, LessonsRepo, SentencesRepo, WordsRepo
+from langread.db.repositories import (
+    HskRepo,
+    LessonsRepo,
+    SentencesRepo,
+    SettingsRepo,
+    WordsRepo,
+)
 from langread.services.segmentation import is_cjk
 from langread.services.srs import RATINGS, SrsService
 
 RATING_LABELS = {"standard": "Standard", "easy": "Easy", "difficult": "Difficult",
                  "unchanged": "Unchanged"}
+
+# reading-text font size (user preference, persisted in the settings table)
+FONT_SETTINGS_KEY = "ui.review_font_pt"
+FONT_STEP = 2
+FONT_MIN, FONT_MAX = 8, 40
 
 
 class WordPopup(QWidget):
@@ -122,7 +133,8 @@ class LessonReviewWindow(QDialog):
         self._word_cache: dict[str, object] = {}
 
         self._build_ui()
-        self._render_text()
+        self._font_pt = self._load_font_pt()
+        self._apply_font_size()  # applies the font and renders the text
 
     def _build_ui(self) -> None:
         from PySide6.QtWidgets import QHBoxLayout, QPushButton, QTextBrowser, QVBoxLayout
@@ -149,12 +161,26 @@ class LessonReviewWindow(QDialog):
         cancel_button = QPushButton("Cancel review")
         cancel_button.clicked.connect(self.reject)
 
+        # text size controls (persisted; §8.2 reading comfort)
+        self.font_decrease_button = QPushButton("A−")
+        self.font_decrease_button.setToolTip("Decrease the text size")
+        self.font_decrease_button.clicked.connect(
+            lambda: self._change_font_size(-FONT_STEP)
+        )
+        self.font_increase_button = QPushButton("A+")
+        self.font_increase_button.setToolTip("Increase the text size")
+        self.font_increase_button.clicked.connect(
+            lambda: self._change_font_size(FONT_STEP)
+        )
+
         reading_page = QWidget()
         reading_layout = QVBoxLayout(reading_page)
         reading_layout.addWidget(self.text_browser, 1)
         reading_layout.addWidget(self.audio_bar)
         nav_row = QHBoxLayout()
         nav_row.addWidget(cancel_button)
+        nav_row.addWidget(self.font_decrease_button)
+        nav_row.addWidget(self.font_increase_button)
         nav_row.addStretch(1)
         nav_row.addWidget(self.word_review_button)
         reading_layout.addLayout(nav_row)
@@ -170,6 +196,31 @@ class LessonReviewWindow(QDialog):
 
         layout = QVBoxLayout(self)
         layout.addWidget(self.stack)
+
+    # ---- font size (persisted user preference) ----
+
+    def _load_font_pt(self) -> int:
+        """The stored text size, or the default font size on first use."""
+        stored = SettingsRepo(self.conn).get(FONT_SETTINGS_KEY, default=None)
+        if isinstance(stored, (int, float)) and FONT_MIN <= stored <= FONT_MAX:
+            return int(stored)
+        return self.text_browser.font().pointSize() or 12
+
+    def _apply_font_size(self) -> None:
+        font = self.text_browser.font()
+        font.setPointSize(self._font_pt)
+        self.text_browser.setFont(font)
+        self.text_browser.document().setDefaultFont(font)
+        self._render_text()
+
+    def _change_font_size(self, delta: int) -> None:
+        """A− / A+ : step the text size and remember the choice."""
+        new_pt = max(FONT_MIN, min(FONT_MAX, self._font_pt + delta))
+        if new_pt == self._font_pt:
+            return
+        self._font_pt = new_pt
+        SettingsRepo(self.conn).set(FONT_SETTINGS_KEY, self._font_pt)
+        self._apply_font_size()
 
     # ---- text rendering (§8.2–8.4) ----
 
