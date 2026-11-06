@@ -1,14 +1,16 @@
 """Lesson text generation pipeline (requirements §7.3–7.7, D-12).
 
 Generates a lesson one paragraph at a time: builds each prompt from the
-editable template + the cadence planner's word list, calls the sentence
-generation model, splits the reply into sentences, segments them, checks
-which requested words were actually used, retries when the first-use word
-is missing, and feeds usage back into the planner for the next paragraph.
+editable template + the cadence planner's word list plus a random sample of
+20 Basic words (different for each paragraph), calls the sentence generation
+model, splits the reply into sentences, segments them, checks which
+requested words were actually used, retries when the first-use word is
+missing, and feeds usage back into the planner for the next paragraph.
 """
 
 from __future__ import annotations
 
+import random
 import re
 import sqlite3
 from dataclasses import dataclass, field
@@ -21,6 +23,9 @@ from langread.services.segmentation import SegmentationService
 
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[。！？!?；;])")
 _LEFTOVER_PLACEHOLDER_RE = re.compile(r"\{[a-z_]+\}")
+
+# Number of randomly selected Basic words offered (optionally) per paragraph.
+BASIC_WORDS_PER_PARAGRAPH = 20
 
 
 class GenerationError(Exception):
@@ -119,13 +124,13 @@ class GenerationService:
         except CadenceError as exc:
             raise GenerationError(str(exc)) from exc
 
-        basic_sample = "、".join(
-            w.text for w in self.words.list_by_state("basic")[:50]
-        )
+        basic_samples = self._basic_word_samples(n_paragraphs)
         paragraphs: list[GeneratedParagraph] = []
         for index in range(n_paragraphs):
             plan = planner.plan_paragraph(index)
-            paragraph = self._generate_paragraph(plan, topic.name, basic_sample)
+            paragraph = self._generate_paragraph(
+                plan, topic.name, basic_samples[index]
+            )
             planner.record_usage(paragraph.used_words)
             paragraphs.append(paragraph)
             if progress is not None:
@@ -139,8 +144,30 @@ class GenerationService:
             paragraphs=paragraphs,
         )
 
+    def _basic_word_samples(self, n_paragraphs: int) -> list[list[str]]:
+        """Random Basic-word samples, one per paragraph (optional vocabulary).
+
+        Each paragraph is offered a random sample of BASIC_WORDS_PER_PARAGRAPH
+        words from the Basic word list. Samples are drawn without replacement
+        so the words differ between paragraphs; the pool is reshuffled only
+        if it is exhausted (i.e. a small Basic word list).
+        """
+        pool = [w.text for w in self.words.list_by_state("basic")]
+        if not pool:
+            return [[] for _ in range(n_paragraphs)]
+        deck = list(pool)
+        random.shuffle(deck)
+        samples: list[list[str]] = []
+        for _ in range(n_paragraphs):
+            if len(deck) < BASIC_WORDS_PER_PARAGRAPH:
+                deck = list(pool)
+                random.shuffle(deck)
+            samples.append(deck[:BASIC_WORDS_PER_PARAGRAPH])
+            del deck[:BASIC_WORDS_PER_PARAGRAPH]
+        return samples
+
     def _generate_paragraph(self, plan, topic_name: str,
-                            basic_sample: str) -> GeneratedParagraph:
+                            basic_words: list[str]) -> GeneratedParagraph:
         if plan.is_final:
             template = self.templates.get("generate_final_paragraph")
             if not template:
@@ -148,6 +175,7 @@ class GenerationService:
             prompt = fill_template(template, {
                 "topic_name": topic_name,
                 "all_new_words": "、".join(plan.all_new_words),
+                "basic_words": "、".join(basic_words) or "（无）",
             })
         elif plan.first_use:
             template = self.templates.get("generate_paragraph")
@@ -158,6 +186,7 @@ class GenerationService:
                 "new_word": plan.first_use,
                 "repeat_words": "、".join(plan.repeat_words) or "（无）",
                 "review_words": "、".join(plan.review_words) or "（无）",
+                "basic_words": "、".join(basic_words) or "（无）",
             })
         else:
             # paragraphs without a first-use word use a dedicated template so
@@ -170,6 +199,7 @@ class GenerationService:
                 "topic_name": topic_name,
                 "repeat_words": "、".join(plan.repeat_words) or "（无）",
                 "review_words": "、".join(plan.review_words) or "（无）",
+                "basic_words": "、".join(basic_words) or "（无）",
             })
 
         requested = (

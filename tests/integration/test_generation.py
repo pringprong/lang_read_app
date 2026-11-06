@@ -189,3 +189,74 @@ def test_retry_failure_keeps_earlier_text(conn):
     assert len(draft.paragraphs) == 8
     assert draft.paragraphs[0].text
     assert NEW[0] not in draft.paragraphs[0].used_words
+
+
+def test_basic_words_sampled_per_paragraph(conn):
+    """Each paragraph prompt carries a random sample of 20 Basic words, and
+    the samples differ between paragraphs (drawn without replacement)."""
+    _conn, topic_id = conn
+    words = WordsRepo(_conn)
+    BASIC = [f"基词{i:03d}" for i in range(200)]
+    for text in BASIC:
+        words.get_or_create(text, list_state="basic")
+    # templates that surface the basic sample in a parseable segment
+    TemplatesRepo(_conn).upsert(
+        "generate_paragraph",
+        "WORDS: new={new_word}; repeat={repeat_words}; review={review_words}; "
+        "basic={basic_words}; topic={topic_name}",
+    )
+    TemplatesRepo(_conn).upsert(
+        "generate_paragraph_no_new",
+        "WORDS-NO-NEW: repeat={repeat_words}; review={review_words}; "
+        "basic={basic_words}; topic={topic_name}",
+    )
+    TemplatesRepo(_conn).upsert("generate_final_paragraph", "FINAL: {all_new_words}")
+
+    service = GenerationService(_conn, llm=ScriptedLlm())
+    draft = service.generate_lesson(topic_id, NEW, REVIEW, 8)
+
+    samples: list[list[str]] = []
+    for call in service.llm.calls:
+        if call.startswith("FINAL:"):
+            continue  # final template deliberately omits the basic sample here
+        for segment in call.split(";"):
+            if segment.strip().startswith("basic="):
+                sample = [w for w in segment.partition("=")[2].split("、") if w]
+                samples.append(sample)
+    assert len(samples) == 7  # 8 paragraphs minus the final one
+    for sample in samples:
+        assert len(sample) == 20  # 20 words per paragraph
+        assert len(set(sample)) == 20  # no duplicates within a paragraph
+    # different words for each paragraph (no overlap between samples)
+    flat = [word for sample in samples for word in sample]
+    assert len(flat) == len(set(flat)) == 20 * len(samples)
+    assert set(flat) <= set(BASIC) | set(REVIEW)  # drawn from the Basic list
+
+
+def test_basic_words_smaller_than_sample(conn):
+    """A small Basic word list still works: fewer than 20 words are offered
+    (no crash, no duplication within a paragraph)."""
+    _conn, topic_id = conn
+    TemplatesRepo(_conn).upsert(
+        "generate_paragraph",
+        "WORDS: new={new_word}; repeat={repeat_words}; review={review_words}; "
+        "basic={basic_words}; topic={topic_name}",
+    )
+    TemplatesRepo(_conn).upsert(
+        "generate_paragraph_no_new",
+        "WORDS-NO-NEW: repeat={repeat_words}; review={review_words}; "
+        "basic={basic_words}; topic={topic_name}",
+    )
+    TemplatesRepo(_conn).upsert("generate_final_paragraph", "FINAL: {all_new_words}")
+
+    service = GenerationService(_conn, llm=ScriptedLlm())
+    draft = service.generate_lesson(topic_id, NEW, REVIEW, 8)  # pool of 2 basic words
+    for call in service.llm.calls:
+        if call.startswith("FINAL:"):
+            continue
+        if call.startswith("WORDS:") or call.startswith("WORDS-NO-NEW:"):
+            segment = call.split(";")[3]
+            sample = [w for w in segment.partition("=")[2].split("、") if w]
+            assert 1 <= len(sample) <= 2
+            assert len(set(sample)) == len(sample)
+    assert len(draft.paragraphs) == 8

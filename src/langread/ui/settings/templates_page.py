@@ -22,14 +22,17 @@ TEMPLATE_PLACEHOLDERS: dict[str, list[str]] = {
     "parse_pasted_text": ["{text}"],
     "generate_paragraph": [
         "{topic_name}", "{new_word}", "{repeat_words}", "{review_words}",
+        "{basic_words}",
     ],
     "generate_paragraph_no_new": [
-        "{topic_name}", "{repeat_words}", "{review_words}",
+        "{topic_name}", "{repeat_words}", "{review_words}", "{basic_words}",
     ],
     "generate_sentence": [
         "{topic_name}", "{new_word}", "{repeat_words}", "{review_words}",
     ],
-    "generate_final_paragraph": ["{topic_name}", "{all_new_words}"],
+    "generate_final_paragraph": [
+        "{topic_name}", "{all_new_words}", "{basic_words}",
+    ],
     "translate_word": ["{word}"],
     "translate_sentence": ["{sentence}"],
 }
