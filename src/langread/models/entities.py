@@ -47,6 +47,8 @@ class Word:
     hsk_word_id: int | None = None
     source: str | None = None
     added_at: str | None = None
+    # where the current definition came from (schema v3):
+    definition_source: str | None = None  # 'dictionary'|'llm'|'hsk'|'manual'
     # SRS state (meaningful when list_state == 'learned'):
     ease: float = 2.5
     interval_days: float | None = None

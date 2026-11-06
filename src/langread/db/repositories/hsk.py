@@ -94,3 +94,12 @@ class HskRepo:
                 "UPDATE hsk_words SET app_state = ? WHERE id = ?",
                 (app_state, hsk_word_id),
             )
+
+    def set_translation(self, hsk_word_id: int, pinyin: str | None,
+                        definition: str | None) -> None:
+        """Overwrite an entry's pinyin/definition (definition refresh)."""
+        with transaction(self.conn):
+            self.conn.execute(
+                "UPDATE hsk_words SET pinyin = ?, definition = ? WHERE id = ?",
+                (pinyin, definition, hsk_word_id),
+            )

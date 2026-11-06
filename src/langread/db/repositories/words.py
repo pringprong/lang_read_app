@@ -9,6 +9,7 @@ from langread.models import Word
 
 WORD_STATES = ("new", "learned", "basic")
 WORD_SOURCES = ("paste", "manual", "lesson", "basic", "hsk")
+DEFINITION_SOURCES = ("dictionary", "llm", "hsk", "manual")
 
 
 class WordsRepo:
@@ -25,6 +26,7 @@ class WordsRepo:
             hsk_word_id=row["hsk_word_id"],
             source=row["source"],
             added_at=row["added_at"],
+            definition_source=row["definition_source"],
             ease=row["ease"],
             interval_days=row["interval_days"],
             due_at=row["due_at"],
@@ -54,21 +56,28 @@ class WordsRepo:
         pinyin: str | None = None,
         definition: str | None = None,
         hsk_word_id: int | None = None,
+        definition_source: str | None = None,
     ) -> tuple[Word, bool]:
         """Return (word, created). Existing membership wins (§5.1)."""
         if list_state not in WORD_STATES:
             raise ValueError(f"invalid word state: {list_state}")
         if source is not None and source not in WORD_SOURCES:
             raise ValueError(f"invalid word source: {source}")
+        if definition_source is not None and (
+            definition_source not in DEFINITION_SOURCES
+        ):
+            raise ValueError(f"invalid definition source: {definition_source}")
         existing = self.get_by_text(text)
         if existing is not None:
             return existing, False
         with transaction(self.conn):
             cur = self.conn.execute(
                 "INSERT INTO words "
-                "(text, pinyin, definition, list_state, hsk_word_id, source, added_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (text, pinyin, definition, list_state, hsk_word_id, source, utcnow_iso()),
+                "(text, pinyin, definition, list_state, hsk_word_id, source, "
+                "added_at, definition_source) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (text, pinyin, definition, list_state, hsk_word_id, source,
+                 utcnow_iso(), definition_source),
             )
         word = self.get(cur.lastrowid)
         assert word is not None  # just inserted
@@ -108,11 +117,19 @@ class WordsRepo:
                 )
 
     def set_translation(self, word_id: int, pinyin: str | None,
-                        definition: str | None) -> None:
+                        definition: str | None,
+                        definition_source: str | None = None) -> None:
+        """Update pinyin/definition and record where the definition came
+        from ('dictionary' | 'llm' | 'hsk' | 'manual', schema v3)."""
+        if definition_source is not None and (
+            definition_source not in DEFINITION_SOURCES
+        ):
+            raise ValueError(f"invalid definition source: {definition_source}")
         with transaction(self.conn):
             self.conn.execute(
-                "UPDATE words SET pinyin = ?, definition = ? WHERE id = ?",
-                (pinyin, definition, word_id),
+                "UPDATE words SET pinyin = ?, definition = ?, "
+                "definition_source = ? WHERE id = ?",
+                (pinyin, definition, definition_source, word_id),
             )
 
     def set_srs(self, word_id: int, *, ease: float, interval_days: float | None,

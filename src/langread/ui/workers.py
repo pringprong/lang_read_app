@@ -59,6 +59,7 @@ class SentenceTranslationWorker(QThread):
     def run(self) -> None:  # QThread entry point
         from langread.db import connect
         from langread.db.repositories import SettingsRepo
+        from langread.services.dictionary import get_dictionary
         from langread.services.lesson_saver import LessonSaver, SaveError
         from langread.services.llm_client import LlmClient
         from langread.services.model_settings import (
@@ -73,6 +74,7 @@ class SentenceTranslationWorker(QThread):
                 translation = TranslationService(
                     conn,
                     LlmClient(ModelSettings(SettingsRepo(conn)).llm_config("trans")),
+                    dictionary=get_dictionary(),
                 )
             except ModelSettingsError as exc:
                 self.failed.emit(str(exc))

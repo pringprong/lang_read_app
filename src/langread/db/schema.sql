@@ -56,6 +56,8 @@ CREATE TABLE words (
     source        TEXT CHECK (source IN
                   ('paste', 'manual', 'lesson', 'basic', 'hsk')),
     added_at      TEXT NOT NULL,
+    definition_source TEXT CHECK (definition_source IN
+                  ('dictionary', 'llm', 'hsk', 'manual')),  -- v3
     -- SRS fields, meaningful when list_state = 'learned':
     ease            REAL NOT NULL DEFAULT 2.5,
     interval_days   REAL,

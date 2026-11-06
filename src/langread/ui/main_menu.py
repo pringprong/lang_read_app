@@ -21,6 +21,7 @@ MENU_ITEMS: list[tuple[str, str, str]] = [
     ("Manage topics", "Create, rename or delete topics.", "topics"),
     ("Add new words", "Add words to the new word list (paste, manual, HSK).", "words_add"),
     ("Manage word lists", "Review the new / learned / basic / HSK word lists.", "words_lists"),
+    ("Refresh definitions", "Rebuild every word's definition from the offline dictionary.", "refresh_defs"),
     ("Model settings", "Prompt templates, model URLs, and API keys.", "settings_models"),
     ("SRS settings", "Spaced-repetition algorithm parameters.", "settings_srs"),
     ("Sync with Android", "Export / import sync bundles over USB.", "sync"),
@@ -93,6 +94,12 @@ class MainMenu(QMainWindow):
             from langread.ui.words.list_manager import WordListManager
 
             WordListManager(self.conn(), parent=self).exec()
+        elif action == "refresh_defs":
+            from langread.ui.refresh_definitions import RefreshDefinitionsDialog
+
+            RefreshDefinitionsDialog(
+                self.conn(), db_path=db_path(), parent=self
+            ).exec()
         elif action == "settings_models":
             self._open_settings(initial_tab=0)
         elif action == "settings_srs":

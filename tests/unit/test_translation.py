@@ -64,6 +64,52 @@ def test_translate_word_parses_json(conn):
     assert service.translate_word("厨房") == ("chú fáng", "kitchen")
 
 
+class StubDictionary:
+    def __init__(self, entries):
+        self.entries = entries
+
+    def lookup(self, word):
+        return self.entries.get(word)
+
+
+def test_translate_word_dictionary_hit_skips_llm(conn):
+    """A dictionary hit is returned directly; the model is never called
+    (the stub raises if it were)."""
+    from langread.services.dictionary import DictEntry
+
+    entry = DictEntry(headword="厨房", pinyin="chú fáng", definition="kitchen")
+    service = TranslationService(
+        conn,
+        llm=StubLlm(error=LlmError("boom")),
+        dictionary=StubDictionary({"厨房": entry}),
+    )
+    assert service.translate_word("厨房") == ("chú fáng", "kitchen")
+
+
+def test_translate_word_dictionary_miss_falls_back_to_llm(conn):
+    from langread.services.dictionary import DictEntry
+
+    entry = DictEntry(headword="厨房", pinyin="chú fáng", definition="kitchen")
+    service = TranslationService(
+        conn,
+        llm=StubLlm(word_result={"pinyin": "p", "definition": "d"}),
+        dictionary=StubDictionary({"厨房": entry}),
+    )
+    assert service.translate_word("学习") == ("p", "d")
+
+
+def test_translate_word_entry_without_values_ignored(conn):
+    from langread.services.dictionary import DictEntry
+
+    empty = DictEntry(headword="学习", pinyin=None, definition="")
+    service = TranslationService(
+        conn,
+        llm=StubLlm(word_result={"pinyin": "p", "definition": "d"}),
+        dictionary=StubDictionary({"学习": empty}),
+    )
+    assert service.translate_word("学习") == ("p", "d")
+
+
 def test_translate_word_invalid_shapes(conn):
     # non-dict JSON → (None, None), not an exception
     service = TranslationService(conn, llm=StubLlm(word_result=["not", "a", "dict"]))

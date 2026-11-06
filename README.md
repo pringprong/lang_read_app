@@ -40,6 +40,9 @@ QT_QPA_PLATFORM=offscreen .venv/bin/pytest
 3. **Add words**: paste Chinese text (tick the words that are new to you —
    the rest go to the Basic list), enter words one by one, or bulk-add from
    the bundled **HSK 1–6 lists** (4,991 words with pinyin and definitions).
+   Pinyin and English definitions are filled automatically: the bundled
+   offline **CC-CEDICT** dictionary (125,000 entries) is checked first, and
+   the translation model is only asked when a word isn't in it.
 4. **Create a new lesson**: menu → *Manage lessons* → pick the topic →
    *New lesson…*: accept or change the suggested
    words, generate paragraph by paragraph, hand-edit the text or word
@@ -52,14 +55,24 @@ QT_QPA_PLATFORM=offscreen .venv/bin/pytest
    drive the spaced repetition. *Manage lessons* also lets you edit a
    lesson's text, regenerate its audio, and delete the last lesson of a
    topic (its new words return to the New list).
-6. **Sync with Android**: export a sync bundle and copy it to the phone over
+6. **Refresh definitions** (menu → *Refresh definitions*): rebuild every
+   word's pinyin and definition from the offline dictionary — the database
+   is backed up first, and words the dictionary lacks have their old
+   definition cleared (optionally re-filled by the translation model). The
+   same job can be run from the terminal: `scripts/refresh_definitions.py`.
+7. **Sync with Android**: export a sync bundle and copy it to the phone over
    USB; import the phone's results bundle back (verified + auto-backup).
 
 ## Data, backups, safety
 
 - Database, audio and backups live in `~/.local/share/LangReadApp/`
   (Windows: `%LOCALAPPDATA%\LangReadApp`). Override with `LANGREAD_DATA_DIR`.
-- Every sync import takes an automatic DB backup first (`backups/`).
+- The offline dictionary is the bundled CC-CEDICT resource
+  (CC BY-SA 4.0, https://cc-cedict.org — see
+  `src/langread/resources/dictionaries/README.txt`). `LANGREAD_CEDICT` can
+  point at another CC-CEDICT file (plain or gzipped) or be set to `off`.
+- Every sync import and every definition refresh takes an automatic DB
+  backup first (`backups/`).
 - Interrupted lesson saves leave the lesson *incomplete* and are resumable.
 
 ## Packaging (PyInstaller)
@@ -84,13 +97,13 @@ templates, imports the HSK dataset, and exits 0 on success.
 ## Testing
 
 ```bash
-QT_QPA_PLATFORM=offscreen .venv/bin/pytest    # 201 tests
+QT_QPA_PLATFORM=offscreen .venv/bin/pytest    # 234 tests
 ```
 
 Unit and integration tests cover the SRS engine, segmentation, generation
-pipeline, save pipeline, sync round-trips, and all UI flows — model endpoints
-are exercised against a local fake OpenAI-compatible server, so no network is
-needed.
+pipeline, save pipeline, sync round-trips, all UI flows, and the offline
+dictionary / definition refresh — model endpoints are exercised against a
+local fake OpenAI-compatible server, so no network is needed.
 
 ## Project status
 

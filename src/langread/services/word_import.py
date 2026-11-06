@@ -2,7 +2,9 @@
 
 Whenever a word is added to the words table and a matching HSK entry exists,
 it is linked (hsk_word_id) and the HSK entry's app_state is kept in sync,
-so definitions/pinyin come for free for HSK vocabulary.
+so definitions/pinyin come for free for HSK vocabulary. When the bundled
+CC-CEDICT dictionary is available, its pinyin/definition take priority over
+the HSK fill (definitions plan §4.2).
 """
 
 from __future__ import annotations
@@ -12,6 +14,7 @@ from dataclasses import dataclass
 
 from langread.db.repositories import HskRepo, TopicsRepo, WordsRepo
 from langread.models import HskWord, Word
+from langread.services.dictionary import DictionaryService, get_dictionary
 from langread.services.segmentation import SegmentationService
 
 
@@ -36,6 +39,7 @@ def link_hsk_entry(conn: sqlite3.Connection, word_id: int) -> bool:
         words.set_translation(
             word.id, word.pinyin or entry.pinyin,
             word.definition or entry.definition,
+            definition_source="hsk" if word.definition is None else None,
         )
     conn.execute(
         "UPDATE words SET hsk_word_id = ? WHERE id = ?", (entry.id, word.id)
@@ -62,11 +66,17 @@ class ImportSummary:
 
 class WordImportService:
     def __init__(self, conn: sqlite3.Connection,
-                 segmentation: SegmentationService | None = None) -> None:
+                 segmentation: SegmentationService | None = None,
+                 dictionary: DictionaryService | None = None) -> None:
         self.conn = conn
         self.words = WordsRepo(conn)
         self.hsk = HskRepo(conn)
         self.topics = TopicsRepo(conn)
+        if dictionary is not None:
+            self.dictionary = dictionary  # explicit override (tests)
+        else:
+            # the bundled offline dictionary (None when unavailable/off)
+            self.dictionary = get_dictionary()
         if segmentation is None:
             # The bundled HSK dataset feeds the segmentation dictionary, so
             # make sure it is imported before building it (fresh databases).
@@ -83,6 +93,20 @@ class WordImportService:
         link_hsk_entry(self.conn, word.id)
         return self.words.get(word.id)  # type: ignore[return-value]
 
+    def _fill_from_dictionary(self, word: Word) -> Word:
+        """Dictionary values win over any HSK fill (definitions plan §4.2)."""
+        if self.dictionary is None:
+            return word
+        entry = self.dictionary.lookup(word.text)
+        if entry is None or not (entry.pinyin or entry.definition):
+            return word
+        self.words.set_translation(
+            word.id, entry.pinyin or word.pinyin,
+            entry.definition or word.definition,
+            definition_source="dictionary" if entry.definition else None,
+        )
+        return self.words.get(word.id)  # type: ignore[return-value]
+
     def _create_word(self, text: str, list_state: str, source: str,
                      topic_id: int | None) -> tuple[Word, bool]:
         word, created = self.words.get_or_create(
@@ -90,6 +114,7 @@ class WordImportService:
         )
         if created:
             word = self._link_hsk(word)
+            word = self._fill_from_dictionary(word)
             if topic_id is not None:
                 self.words.associate_topic(word.id, topic_id)
         return word, created
@@ -160,11 +185,13 @@ class WordImportService:
             hsk_word.text, list_state=target, source="hsk",
             hsk_word_id=hsk_word.id,
             pinyin=hsk_word.pinyin, definition=hsk_word.definition,
+            definition_source="hsk" if hsk_word.definition else None,
         )
         if created:
             if topic_id is not None:
                 self.words.associate_topic(word.id, topic_id)
             self.hsk.set_app_state(hsk_word.id, target)
+            word = self._fill_from_dictionary(word)  # dictionary wins (§4.2)
             return word, created
         # existing word: repair a missing HSK link, then honor the target
         link_hsk_entry(self.conn, word.id)

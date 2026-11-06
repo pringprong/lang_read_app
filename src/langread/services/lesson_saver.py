@@ -167,19 +167,33 @@ class LessonSaver:
             word = self.words.get(word_id)
             if word is None or word.list_state != "new":
                 continue  # already promoted (resume) or missing
-            pinyin, definition = self._word_translation(word.text)
+            pinyin, definition, source = self._word_translation(word.text)
             if word.pinyin is None or word.definition is None:
                 self.words.set_translation(
-                    word.id, word.pinyin or pinyin, word.definition or definition
+                    word.id, word.pinyin or pinyin, word.definition or definition,
+                    definition_source=(
+                        word.definition_source if word.definition is not None
+                        else source
+                    ),
                 )
             self.srs.promote_word(word_id)  # New → Learned + initial SRS (§7.9.3)
 
-    def _word_translation(self, word: str) -> tuple[str | None, str | None]:
+    def _word_translation(
+        self, word: str
+    ) -> tuple[str | None, str | None, str | None]:
+        """(pinyin, definition, definition_source) for one word.
+
+        The translation service checks its offline dictionary first (plan
+        §4.1); a dictionary hit is detected here so the source is recorded.
+        """
         if self.translation is not None:
             pinyin, definition = self.translation.translate_word(word)
             if pinyin or definition:
-                return pinyin, definition
-        return pinyin_fallback(word), None  # offline fallback (pypinyin)
+                dictionary = getattr(self.translation, "dictionary", None)
+                if dictionary is not None and dictionary.lookup(word) is not None:
+                    return pinyin, definition, "dictionary"
+                return pinyin, definition, "llm"
+        return pinyin_fallback(word), None, None  # offline fallback (pypinyin)
 
     def _apply_exposure(self, lesson_id: int, progress: ProgressFn | None) -> None:
         rows = [r for r in self.lessons.lesson_words(lesson_id) if r[2] == "review"]

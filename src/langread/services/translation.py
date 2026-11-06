@@ -33,9 +33,14 @@ def pinyin_fallback(word: str) -> str:
 
 
 class TranslationService:
-    def __init__(self, conn: sqlite3.Connection, llm: LlmClient | None = None) -> None:
+    def __init__(self, conn: sqlite3.Connection, llm: LlmClient | None = None,
+                 dictionary=None) -> None:
+        """`dictionary` is an optional DictionaryService — when it has an
+        entry for a word, translate_word() returns it directly and the
+        model is not called (definitions plan §4.1)."""
         self.templates = TemplatesRepo(conn)
         self.llm = llm
+        self.dictionary = dictionary
 
     # ---- sentence translations (§7.9 step 2) ----
 
@@ -58,7 +63,15 @@ class TranslationService:
     # ---- word pinyin + definition (§7.9 step 3) ----
 
     def translate_word(self, word: str) -> tuple[str | None, str | None]:
-        """Return (pinyin, definition); (None, None) if the model can't answer."""
+        """Return (pinyin, definition); (None, None) if the model can't answer.
+
+        The offline dictionary is checked first (definitions plan §4.1):
+        a hit is returned directly and the model is never called.
+        """
+        if self.dictionary is not None:
+            entry = self.dictionary.lookup(word)
+            if entry is not None and (entry.pinyin or entry.definition):
+                return entry.pinyin, entry.definition
         if self.llm is None:
             return None, None
         template = self.templates.get("translate_word")

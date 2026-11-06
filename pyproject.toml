@@ -30,6 +30,7 @@ langread = [
     "db/schema.sql",
     "resources/prompts/*.json",
     "resources/hsk/*.csv",
+    "resources/dictionaries/*",
 ]
 
 [tool.pytest.ini_options]

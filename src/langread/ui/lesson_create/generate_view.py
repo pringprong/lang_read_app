@@ -64,6 +64,7 @@ class SaveWorker(QThread):
 
     def run(self) -> None:
         from langread.db.repositories import SettingsRepo
+        from langread.services.dictionary import get_dictionary
         from langread.services.lesson_saver import LessonSaver, SaveError
         from langread.services.llm_client import LlmClient
         from langread.services.model_settings import (
@@ -79,7 +80,8 @@ class SaveWorker(QThread):
             tts = TtsService(settings.tts_config())  # required: raises if unset
             try:
                 translation = TranslationService(
-                    conn, LlmClient(settings.llm_config("trans"))
+                    conn, LlmClient(settings.llm_config("trans")),
+                    dictionary=get_dictionary(),
                 )
             except ModelSettingsError:
                 translation = None  # optional: sentences stay untranslated
@@ -116,6 +118,7 @@ class FinalizeWorker(QThread):
 
     def run(self) -> None:
         from langread.db.repositories import SettingsRepo
+        from langread.services.dictionary import get_dictionary
         from langread.services.lesson_saver import LessonSaver, SaveError
         from langread.services.llm_client import LlmClient
         from langread.services.model_settings import (
@@ -131,7 +134,8 @@ class FinalizeWorker(QThread):
             tts = TtsService(settings.tts_config())
             try:
                 translation = TranslationService(
-                    conn, LlmClient(settings.llm_config("trans"))
+                    conn, LlmClient(settings.llm_config("trans")),
+                    dictionary=get_dictionary(),
                 )
             except ModelSettingsError:
                 translation = None

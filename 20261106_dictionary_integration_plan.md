@@ -1,5 +1,13 @@
 # Dictionary Integration Plan — offline English word definitions (2026-11-06, v2)
 
+> **Status: IMPLEMENTED (2026-11-06).** All sections below are built and
+> tested (235 tests pass). Open decisions were resolved as: 3-sense cap,
+> refresh of `words` + `hsk_words`, dictionary overwrites both pinyin and
+> definition, gzipped resource packaging, proper nouns kept and the refresh
+> LLM fallback is opt-in (misses are cleared, not invented). The live
+> database was refreshed: 1,110 of 1,111 words now carry dictionary
+> definitions (backup taken first).
+
 > **v2 revision:** requirements clarified — definitions must be **in
 > English** and the app is **simplified-Chinese only**. MengDict-DB-0.1 was
 > assessed and **rejected** (§2.1); the zh-zh reader.dict files from v1 of

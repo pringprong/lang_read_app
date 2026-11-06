@@ -95,6 +95,58 @@ def test_add_manual(service, words):
     assert not created2
 
 
+# ---- offline dictionary fill (definitions plan §4.2) ----
+
+CEDICT_FIXTURE = (
+    "廚房 厨房 [chu2 fang2] /kitchen/CL:間|间[jian1]/\n"
+    "機場 机场 [ji1 chang3] /airport/airfield/\n"
+)
+
+
+def test_add_manual_fills_from_dictionary(conn, words, monkeypatch, tmp_path):
+    path = tmp_path / "cedict.txt"
+    path.write_text(CEDICT_FIXTURE, encoding="utf-8")
+    monkeypatch.setenv("LANGREAD_CEDICT", str(path))
+    service = WordImportService(conn)
+
+    word, _ = service.add_manual("厨房")
+    assert word.pinyin == "chú fáng"
+    assert word.definition == "kitchen"
+    assert word.definition_source == "dictionary"
+
+
+def test_dictionary_wins_over_hsk_fill(conn, words, hsk, monkeypatch, tmp_path):
+    path = tmp_path / "cedict.txt"
+    path.write_text(CEDICT_FIXTURE, encoding="utf-8")
+    monkeypatch.setenv("LANGREAD_CEDICT", str(path))
+    hsk.import_rows([("厨房", "chu fang", "kitchen (HSK gloss)", 4)])
+    service = WordImportService(conn)
+
+    word, _ = service.add_manual("厨房")
+    # linked to the HSK entry, but the dictionary values won
+    assert word.hsk_word_id is not None
+    assert word.definition == "kitchen"
+    assert word.pinyin == "chú fáng"
+    assert word.definition_source == "dictionary"
+    assert hsk.find_by_text("厨房")[0].app_state == "new"
+
+
+def test_add_from_hsk_overridden_by_dictionary(conn, words, hsk, monkeypatch,
+                                               tmp_path):
+    path = tmp_path / "cedict.txt"
+    path.write_text(CEDICT_FIXTURE, encoding="utf-8")
+    monkeypatch.setenv("LANGREAD_CEDICT", str(path))
+    entry = hsk.import_rows([("厨房", "chu fang", "kitchen (HSK gloss)", 4)])
+    assert entry == 1
+    service = WordImportService(conn)
+
+    word, created = service.add_from_hsk(hsk.find_by_text("厨房")[0])
+    assert created
+    assert word.hsk_word_id is not None
+    assert word.definition == "kitchen"
+    assert word.definition_source == "dictionary"
+
+
 def test_add_manual_rejects_empty(service):
     with pytest.raises(ValueError):
         service.add_manual("   ")

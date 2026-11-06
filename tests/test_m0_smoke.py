@@ -48,11 +48,12 @@ def test_main_menu_constructs_and_lists_all_items(qapp: QApplication) -> None:
     from PySide6.QtWidgets import QPushButton
 
     push_buttons = window.findChildren(QPushButton)
-    assert len(push_buttons) == 8
+    assert len(push_buttons) == 9
     labels = [b.text() for b in push_buttons]
     assert "Manage lessons" in labels
     assert "Manage topics" in labels
     assert "Add new words" in labels
+    assert "Refresh definitions" in labels
     assert "Sync with Android" in labels
     assert "Quit" in labels
     assert "Create a new lesson" not in labels  # moved into "Manage lessons"
