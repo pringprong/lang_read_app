@@ -15,6 +15,35 @@ from langread.models import HskWord, Word
 from langread.services.segmentation import SegmentationService
 
 
+def link_hsk_entry(conn: sqlite3.Connection, word_id: int) -> bool:
+    """Link an unlinked word to its bundled HSK entry (§5.5).
+
+    Fills in missing pinyin/definition from the entry, stores the word's
+    hsk_word_id and syncs the entry's app_state to the word's list, so the
+    HSK browser shows where the word is used in the app. Returns True when
+    a link was made; no-op (False) for missing words, words without an HSK
+    match, or words that are already linked.
+    """
+    words = WordsRepo(conn)
+    word = words.get(word_id)
+    if word is None or word.hsk_word_id is not None:
+        return False
+    matches = HskRepo(conn).find_by_text(word.text)
+    if not matches:
+        return False
+    entry = matches[0]
+    if word.pinyin is None or word.definition is None:
+        words.set_translation(
+            word.id, word.pinyin or entry.pinyin,
+            word.definition or entry.definition,
+        )
+    conn.execute(
+        "UPDATE words SET hsk_word_id = ? WHERE id = ?", (entry.id, word.id)
+    )
+    HskRepo(conn).set_app_state(entry.id, word.list_state)
+    return True
+
+
 @dataclass(frozen=True)
 class ParsedWord:
     """One distinct word found in pasted text, with existing context."""
@@ -51,16 +80,7 @@ class WordImportService:
 
     def _link_hsk(self, word: Word) -> Word:
         """Attach HSK info (id, pinyin, definition) if available."""
-        matches = self.hsk.find_by_text(word.text)
-        if not matches or word.hsk_word_id is not None:
-            return word
-        entry = matches[0]
-        if word.pinyin is None:
-            self.words.set_translation(word.id, entry.pinyin, entry.definition)
-        self.conn.execute(
-            "UPDATE words SET hsk_word_id = ? WHERE id = ?", (entry.id, word.id)
-        )
-        self.hsk.set_app_state(entry.id, word.list_state)
+        link_hsk_entry(self.conn, word.id)
         return self.words.get(word.id)  # type: ignore[return-value]
 
     def _create_word(self, text: str, list_state: str, source: str,
@@ -127,7 +147,13 @@ class WordImportService:
 
     def add_from_hsk(self, hsk_word: HskWord, target: str = "new",
                      topic_id: int | None = None) -> tuple[Word, bool]:
-        """Add an HSK word to the New or Basic list, with pinyin/definition."""
+        """Add an HSK word to the New or Basic list, with pinyin/definition.
+
+        If the word already exists — e.g. it was added earlier without its
+        HSK entry being linked, so the browser still showed it as unused —
+        it is linked to the entry and moved to the target list: the action
+        always takes effect.
+        """
         if target not in ("new", "basic"):
             raise ValueError(f"invalid target list: {target}")
         word, created = self.words.get_or_create(
@@ -138,6 +164,15 @@ class WordImportService:
         if created:
             if topic_id is not None:
                 self.words.associate_topic(word.id, topic_id)
+            self.hsk.set_app_state(hsk_word.id, target)
+            return word, created
+        # existing word: repair a missing HSK link, then honor the target
+        link_hsk_entry(self.conn, word.id)
+        word = self.words.get(word.id)  # type: ignore[return-value]
+        if word.list_state != target:
+            self.words.move_to_state(word.id, target)  # syncs app_state
+            word = self.words.get(word.id)  # type: ignore[return-value]
+        else:
             self.hsk.set_app_state(hsk_word.id, target)
         return word, created
 

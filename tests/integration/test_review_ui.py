@@ -200,6 +200,29 @@ def test_word_popup_actions(qapp, env):
     window.close()
 
 
+def test_word_popup_add_links_hsk(qapp, env):
+    """Adding a word from the review popup keeps the HSK entry in sync
+    (§5.5) — otherwise the HSK browser keeps showing the word as unused
+    and its Add buttons appear to do nothing."""
+    from langread.db.repositories import HskRepo
+
+    conn, _topic, lesson_id = env
+    hsk = HskRepo(conn)
+    hsk.import_rows([("我们", "wǒ men", "we; us", 1)])
+    window = LessonReviewWindow(conn, lesson_id)
+    window._show_word_popup("我们")
+    popup = window._popup
+    assert popup.word is None
+    popup._add("new")
+
+    word = WordsRepo(conn).get_by_text("我们")
+    assert word.list_state == "new"
+    assert word.hsk_word_id is not None  # linked to the HSK entry
+    assert word.pinyin == "wǒ men"  # pinyin/definition came for free
+    assert hsk.find_by_text("我们")[0].app_state == "new"  # synced
+    window.close()
+
+
 def test_word_review_complete_and_cancel(qapp, env, monkeypatch):
     conn, _topic, lesson_id = env
     srs = SrsService(conn)

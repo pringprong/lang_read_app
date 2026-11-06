@@ -87,19 +87,9 @@ class LessonSaver:
 
     def _link_hsk(self, word) -> None:
         """Link a newly created word to its bundled HSK entry, if any."""
-        matches = self.hsk.find_by_text(word.text)
-        if not matches:
-            return
-        entry = matches[0]
-        if word.pinyin is None or word.definition is None:
-            self.words.set_translation(
-                word.id, word.pinyin or entry.pinyin,
-                word.definition or entry.definition,
-            )
-        self.conn.execute(
-            "UPDATE words SET hsk_word_id = ? WHERE id = ?", (entry.id, word.id)
-        )
-        self.hsk.set_app_state(entry.id, word.list_state)
+        from langread.services.word_import import link_hsk_entry
+
+        link_hsk_entry(self.conn, word.id)
 
     # ---- resumable core ----
 

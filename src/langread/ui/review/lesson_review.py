@@ -90,7 +90,15 @@ class WordPopup(QWidget):
             layout.addWidget(move_button)
 
     def _add(self, list_state: str) -> None:
-        self.words.get_or_create(self.text, list_state=list_state, source="lesson")
+        word, created = self.words.get_or_create(
+            self.text, list_state=list_state, source="lesson"
+        )
+        if created:
+            # keep the bundled HSK entry in sync (§5.5): without this, the
+            # HSK browser would keep showing the word as unused
+            from langread.services.word_import import link_hsk_entry
+
+            link_hsk_entry(self.conn, word.id)
         self.list_changed.emit()
         self.close()
 

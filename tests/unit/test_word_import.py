@@ -121,6 +121,42 @@ def test_add_from_hsk_rejects_bad_target(service, hsk):
         service.add_from_hsk(hsk.find_by_text("厨房")[0], target="learned")
 
 
+def test_add_from_hsk_existing_word_takes_effect(service, words, hsk):
+    """Regression: an HSK word that already exists on another list (e.g.
+    created from the lesson-review popup, never linked) must still be
+    linked and moved to the target list — not silently ignored."""
+    hsk.import_rows([("聊天", "liáo tiān", "to chat", 4)])
+    entry = hsk.find_by_text("聊天")[0]
+    # the word already exists on the New list, unlinked — the HSK browser
+    # still shows it as "unused"
+    words.get_or_create("聊天", list_state="new", source="lesson")
+    assert entry.app_state == "unused"
+
+    word, created = service.add_from_hsk(entry, target="basic")
+    assert not created  # no duplicate row
+    word = words.get_by_text("聊天")
+    assert words.count_by_state("new") + words.count_by_state("basic") == 1
+    assert word.list_state == "basic"  # moved to Basic — action took effect
+    assert word.hsk_word_id == entry.id  # linked to the HSK entry
+    assert word.pinyin == entry.pinyin and word.definition == entry.definition
+    assert hsk.find_by_text("聊天")[0].app_state == "basic"  # synced
+
+
+def test_add_from_hsk_existing_word_on_target_list(service, words, hsk):
+    """A word already on the target list (but unlinked) is linked and the
+    HSK entry synced, so it stops showing as "unused"."""
+    hsk.import_rows([("东西", "dōng xi", "thing", 2)])
+    entry = hsk.find_by_text("东西")[0]
+    words.get_or_create("东西", list_state="basic", source="lesson")
+
+    word, created = service.add_from_hsk(entry, target="basic")
+    assert not created
+    word = words.get_by_text("东西")
+    assert word.list_state == "basic"  # unchanged
+    assert word.hsk_word_id == entry.id
+    assert hsk.find_by_text("东西")[0].app_state == "basic"
+
+
 def test_move_between_basic_and_new(service, words):
     word, _ = service.add_manual("桌子")
     service.move_new_to_basic(word.id)
