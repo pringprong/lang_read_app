@@ -9,7 +9,7 @@ import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication, QInputDialog, QMessageBox
+from PySide6.QtWidgets import QApplication, QDialog, QInputDialog, QMessageBox
 
 from langread.db import connect
 from langread.db.repositories import (
@@ -175,14 +175,17 @@ def test_delete_lesson_button(qapp, env, monkeypatch):
 # ---- lesson text editing ----
 
 
-def test_edit_lesson_text(qapp, env, monkeypatch):
+def test_edit_lesson_text(qapp, env, monkeypatch, tmp_path):
     conn, _topic, lesson1_id, _l2, audio_dir = env
     monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: None)
+    # the translation model is not configured → the changed sentence stays
+    # untranslated and the save reports it (use "Regenerate translation")
+    monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: None)
     sentences = SentencesRepo(conn)
     before = sentences.list_for_lesson(lesson1_id)
     assert len(before) == 3  # 2 sentences in paragraph 1 + 1 in paragraph 2
 
-    dialog = EditLessonTextDialog(conn, lesson1_id)
+    dialog = EditLessonTextDialog(conn, lesson1_id, db_path=tmp_path / "test.db")
     assert dialog.edit_page.tabs.count() == 2
 
     # rewrite paragraph 1's text; applying re-splits and re-segments it
@@ -191,16 +194,99 @@ def test_edit_lesson_text(qapp, env, monkeypatch):
     tab._apply_text()
     assert len(tab.paragraph().sentences) == 1
     dialog.save_button.click()
+    dialog.wait_for_translate_worker()
+    for _ in range(10):
+        qapp.processEvents()  # deliver the worker's result to the UI
 
     after = sentences.list_for_lesson(lesson1_id)
     assert [s.text for s in after] == [f"我们学{NEW[3]}。", before[2].text]
-    # unchanged sentences keep their translation; changed ones lose it
+    # unchanged sentences keep their translation; the changed one could not
+    # be translated (no translation model configured in this test)
     assert after[0].translation is None
     assert after[1].translation == before[2].translation
 
     # the text changed → the stale audio is removed and the path cleared
     assert not (audio_dir / f"lesson_{lesson1_id}.mp3").exists()
     assert LessonsRepo(conn).get(lesson1_id).audio_path is None
+
+
+def test_edit_lesson_text_translates_changed_sentences(qapp, env, monkeypatch,
+                                                       tmp_path):
+    """Changed sentences are re-translated immediately after saving, using
+    the translation model from Model settings."""
+    from langread.db.repositories import SettingsRepo
+    from langread.services.model_settings import ModelSettings
+    from tests.fakes.openai_server import FakeOpenAiServer
+
+    conn, _topic, lesson1_id, _l2, _audio_dir = env
+    monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: None)
+    server = FakeOpenAiServer()
+    url = server.start_and_url()
+    try:
+        ModelSettings(SettingsRepo(conn)).save(
+            "trans", {"base_url": url, "model": "fake"}
+        )
+        dialog = EditLessonTextDialog(conn, lesson1_id,
+                                      db_path=tmp_path / "test.db")
+        tab = dialog.edit_page.tabs.widget(0)
+        tab.text_edit.setPlainText(f"我们学{NEW[3]}。")
+        tab._apply_text()
+        dialog.save_button.click()
+        dialog.wait_for_translate_worker()
+        for _ in range(20):
+            qapp.processEvents()
+
+        after = SentencesRepo(conn).list_for_lesson(lesson1_id)
+        assert after[0].text == f"我们学{NEW[3]}。"
+        # the fake server's chat reply was stored as the translation
+        assert after[0].translation == "OK"
+        # the prompt was the translate_sentence template with the sentence
+        prompt = server.chat_calls[-1]["messages"][0]["content"]
+        assert f"我们学{NEW[3]}。" in prompt
+        # only the changed sentence needed a translation
+        assert len(server.chat_calls) == 1
+        assert dialog.result() == QDialog.DialogCode.Accepted
+    finally:
+        server.stop()
+
+
+def test_regenerate_translation_button(qapp, env, monkeypatch, tmp_path):
+    """The 'Regenerate translation' button re-translates every sentence of
+    the selected lesson (existing translations are replaced)."""
+    from langread.db.repositories import SettingsRepo
+    from langread.services.model_settings import ModelSettings
+    from tests.fakes.openai_server import FakeOpenAiServer
+
+    conn, _topic, lesson1_id, _l2, _audio_dir = env
+    monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: None)
+    server = FakeOpenAiServer()
+    url = server.start_and_url()
+    try:
+        ModelSettings(SettingsRepo(conn)).save(
+            "trans", {"base_url": url, "model": "fake"}
+        )
+        dialog = LessonListDialog(conn, db_path=tmp_path / "test.db")
+        dialog.table.selectRow(0)
+        assert dialog.retranslate_button.isEnabled()
+
+        dialog.retranslate_button.click()
+        dialog.wait_for_retranslate_worker()
+        for _ in range(20):
+            qapp.processEvents()
+
+        # every sentence of the lesson was re-translated (stub translations
+        # from the fixture were replaced by the fake server's reply)
+        sentences = SentencesRepo(conn).list_for_lesson(lesson1_id)
+        assert len(sentences) == 3
+        assert all(s.translation == "OK" for s in sentences)
+        assert len(server.chat_calls) == 3
+        # the button and status label were restored
+        assert dialog.retranslate_button.text() == "Regenerate translation"
+        assert dialog.retranslate_button.isEnabled()
+        assert "✅" in dialog.status_label.text()
+        dialog.close()
+    finally:
+        server.stop()
 
 
 def test_edit_lesson_text_unchanged_keeps_audio(qapp, env, monkeypatch):

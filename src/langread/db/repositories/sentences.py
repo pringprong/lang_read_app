@@ -76,6 +76,17 @@ class SentencesRepo:
         ).fetchall()
         return [self._row_to_sentence(r) for r in rows]
 
+    def clear_translations(self, lesson_id: int) -> None:
+        """Set translation = NULL for every sentence of a lesson.
+
+        Used before re-translating a whole lesson ("Regenerate translation").
+        """
+        with transaction(self.conn):
+            self.conn.execute(
+                "UPDATE sentences SET translation = NULL WHERE lesson_id = ?",
+                (lesson_id,),
+            )
+
     def count_for_lesson(self, lesson_id: int) -> int:
         row = self.conn.execute(
             "SELECT COUNT(*) FROM sentences WHERE lesson_id = ?", (lesson_id,)

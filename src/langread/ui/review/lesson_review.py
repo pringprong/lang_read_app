@@ -119,7 +119,10 @@ class LessonReviewWindow(QDialog):
             f"Review — lesson {lesson.order_index}"
             + (f": {lesson.title}" if lesson.title else "")
         )
-        self.resize(760, 640)
+        # open maximized (uses the whole screen) when the window is shown
+        self.setWindowState(
+            self.windowState() | Qt.WindowState.WindowMaximized
+        )
 
         self._sentences = self.sentences.list_for_lesson(lesson_id)
         new_ids = {r[1] for r in self.lessons.lesson_words(lesson_id) if r[2] == "new"}

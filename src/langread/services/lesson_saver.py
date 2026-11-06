@@ -123,10 +123,39 @@ class LessonSaver:
 
     # ---- steps ----
 
-    def _translate_sentences(self, lesson_id: int, progress: ProgressFn | None) -> None:
+    def translate_missing_sentences(self, lesson_id: int,
+                                    progress: ProgressFn | None = None) -> int:
+        """Translate the lesson's untranslated sentences (§7.9 step 2).
+
+        Used after editing a saved lesson: changed sentences lose their
+        stored translation and are translated again here. Returns the
+        number of sentences translated.
+        """
         if self.translation is None:
-            return  # sentences keep NULL translations (documented behavior)
+            raise SaveError(
+                "translation model is not configured "
+                "(open Model settings to set it)"
+            )
+        return self._translate_sentences(lesson_id, progress)
+
+    def retranslate_sentences(self, lesson_id: int,
+                              progress: ProgressFn | None = None) -> int:
+        """Re-translate ALL of the lesson's sentences, replacing the stored
+        ones ("Regenerate translation"). Returns the number translated."""
+        if self.translation is None:
+            raise SaveError(
+                "translation model is not configured "
+                "(open Model settings to set it)"
+            )
+        self.sentences.clear_translations(lesson_id)
+        return self._translate_sentences(lesson_id, progress)
+
+    def _translate_sentences(self, lesson_id: int,
+                             progress: ProgressFn | None) -> int:
+        if self.translation is None:
+            return 0  # sentences keep NULL translations (documented behavior)
         sentences = self.sentences.list_for_lesson(lesson_id)
+        translated = 0
         for i, sentence in enumerate(sentences):
             if progress:
                 progress("translations", i + 1, len(sentences))
@@ -137,6 +166,8 @@ class LessonSaver:
             except TranslationError:
                 continue  # leave untranslated; resumable later
             self.sentences.update(sentence.id, translation=translation)
+            translated += 1
+        return translated
 
     def _promote_new_words(self, lesson_id: int, progress: ProgressFn | None) -> None:
         rows = [r for r in self.lessons.lesson_words(lesson_id) if r[2] == "new"]

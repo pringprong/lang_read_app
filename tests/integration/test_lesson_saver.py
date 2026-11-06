@@ -82,6 +82,45 @@ def _saver(conn, audio_dir, tts, translation):
     return LessonSaver(conn, tts=tts, translation=translation, audio_dir=audio_dir)
 
 
+def test_translate_missing_and_retranslate_sentences(env):
+    """translate_missing_sentences: only the untranslated ones (edit flow);
+    retranslate_sentences: all of them, replacing stored translations."""
+    conn, _topic_id, draft, audio_dir = env
+    sentences = SentencesRepo(conn)
+    saver = _saver(conn, audio_dir, TtsStub(), TranslationStub())
+    lesson = saver.save_lesson(draft)
+    stored = sentences.list_for_lesson(lesson.id)
+    assert all(s.translation for s in stored)
+
+    # simulate an edit: the first sentence loses its translation
+    conn.execute("UPDATE sentences SET translation = NULL WHERE id = ?",
+                 (stored[0].id,))
+    stub = TranslationStub()
+    count = _saver(conn, audio_dir, TtsStub(), stub).translate_missing_sentences(
+        lesson.id
+    )
+    assert count == 1
+    assert stub.sentence_calls == [stored[0].text]  # only the missing one
+    assert all(s.translation for s in sentences.list_for_lesson(lesson.id))
+
+    # retranslate: every sentence, stored translations replaced
+    stub2 = TranslationStub()
+    count2 = _saver(conn, audio_dir, TtsStub(), stub2).retranslate_sentences(
+        lesson.id
+    )
+    assert count2 == len(stored)
+    assert len(stub2.sentence_calls) == len(stored)
+    assert all(s.translation for s in sentences.list_for_lesson(lesson.id))
+
+    # no translation model → a clear error, not a silent no-op
+    with pytest.raises(SaveError, match="not configured"):
+        _saver(conn, audio_dir, TtsStub(), None).translate_missing_sentences(
+            lesson.id
+        )
+    with pytest.raises(SaveError, match="not configured"):
+        _saver(conn, audio_dir, TtsStub(), None).retranslate_sentences(lesson.id)
+
+
 def test_save_lesson_full_pipeline(env):
     conn, topic_id, draft, audio_dir = env
     saver = _saver(conn, audio_dir, TtsStub(), TranslationStub())

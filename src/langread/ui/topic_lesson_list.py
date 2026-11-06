@@ -6,10 +6,13 @@ last reviewed (or "never"), and how many times it was reviewed. Actions:
 - Review lesson (double-click works too)
 - New lesson: the creation wizard for the selected topic (§7.1–7.8)
 - Edit lesson text: hand-edit paragraphs / segmentation of a saved lesson
+  (changed sentences are re-translated immediately after saving)
 - Delete lesson: only the last lesson of the topic (its new words go back
   to the New list, text and audio are removed)
 - Finish saving: resume the M7 save pipeline of an incomplete lesson
 - Regenerate audio: for the selected lesson or for every lesson
+- Regenerate translation: re-translate every sentence of the selected
+  lesson with the translation model
 """
 
 from __future__ import annotations
@@ -93,6 +96,7 @@ class LessonListDialog(QDialog):
         self.sentences = SentencesRepo(conn)
         self._finalize_worker = None
         self._regenerate_worker = None
+        self._retranslate_worker = None
 
         self.topic_combo = QComboBox()
         for topic in self.topics.list_all():
@@ -138,6 +142,13 @@ class LessonListDialog(QDialog):
         )
         self.regenerate_button.clicked.connect(self._regenerate_selected)
         self.regenerate_button.setEnabled(False)
+        self.retranslate_button = QPushButton("Regenerate translation")
+        self.retranslate_button.setToolTip(
+            "Re-translate every sentence of the selected lesson with the "
+            "translation model (replaces the stored translations)"
+        )
+        self.retranslate_button.clicked.connect(self._retranslate_selected)
+        self.retranslate_button.setEnabled(False)
         self.regenerate_all_button = QPushButton("Regenerate ALL audio…")
         self.regenerate_all_button.setToolTip(
             "Re-synthesize the audio of every lesson in the app"
@@ -157,6 +168,7 @@ class LessonListDialog(QDialog):
 
         audio_buttons = QHBoxLayout()
         audio_buttons.addWidget(self.regenerate_button)
+        audio_buttons.addWidget(self.retranslate_button)
         audio_buttons.addWidget(self.regenerate_all_button)
         audio_buttons.addStretch(1)
         audio_buttons.addWidget(self.close_button)
@@ -224,10 +236,15 @@ class LessonListDialog(QDialog):
         self._update_finish_button(status)
         lesson_id = self._selected_lesson_id()
         has_lesson = lesson_id is not None
+        has_sentences = (
+            bool(self.sentences.list_for_lesson(lesson_id))
+            if lesson_id is not None else False
+        )
         self.edit_button.setEnabled(has_lesson)
-        self.regenerate_button.setEnabled(
-            has_lesson
-            and bool(self.sentences.list_for_lesson(lesson_id))
+        self.regenerate_button.setEnabled(has_lesson and has_sentences)
+        self.retranslate_button.setEnabled(
+            has_lesson and has_sentences
+            and self._retranslate_worker is None
         )
         # delete: only the last lesson of the topic (the table is sorted by
         # order, so the last row is the last lesson)
@@ -270,7 +287,8 @@ class LessonListDialog(QDialog):
             return
         from langread.ui.lesson_create.edit_lesson import EditLessonTextDialog
 
-        dialog = EditLessonTextDialog(self.conn, lesson_id, parent=self)
+        dialog = EditLessonTextDialog(self.conn, lesson_id,
+                                      db_path=self._db_path, parent=self)
         dialog.exec()
         self._reload_lessons()
 
@@ -395,4 +413,52 @@ class LessonListDialog(QDialog):
         """Used by tests: block until the regeneration worker finishes."""
         if self._regenerate_worker is not None:
             self._regenerate_worker.wait()
+
+    # ---- translation regeneration ----
+
+    def _retranslate_selected(self) -> None:
+        """Re-translate every sentence of the selected lesson."""
+        lesson_id = self._selected_lesson_id()
+        if lesson_id is None:
+            return
+        from langread.ui.workers import SentenceTranslationWorker
+
+        self.retranslate_button.setEnabled(False)
+        self.retranslate_button.setText("Translating…")
+        self._retranslate_worker = SentenceTranslationWorker(
+            self._db_path, lesson_id, retranslate=True, parent=self
+        )
+        self._retranslate_worker.progress.connect(self._on_retranslate_progress)
+        self._retranslate_worker.done.connect(self._on_retranslate_done)
+        self._retranslate_worker.failed.connect(self._on_retranslate_failed)
+        self._retranslate_worker.start()
+
+    def _on_retranslate_progress(self, current: int, total: int) -> None:
+        self.status_label.setText(
+            f"Re-translating — sentence {current}/{total}"
+        )
+
+    def _on_retranslate_done(self, translated: int) -> None:
+        self.retranslate_button.setText("Regenerate translation")
+        self._retranslate_worker = None
+        self._on_selection_changed()  # refresh enabled state
+        self.status_label.setText(
+            f"✅ Translations regenerated ({translated} sentence(s))."
+        )
+        QMessageBox.information(
+            self, "Translation regenerated",
+            f"Translated {translated} sentence(s).",
+        )
+
+    def _on_retranslate_failed(self, message: str) -> None:
+        self.retranslate_button.setText("Regenerate translation")
+        self._retranslate_worker = None
+        self._on_selection_changed()  # refresh enabled state
+        self.status_label.setText("⚠ Translation failed")
+        QMessageBox.warning(self, "Translation failed", message)
+
+    def wait_for_retranslate_worker(self) -> None:
+        """Used by tests: block until the translation worker finishes."""
+        if self._retranslate_worker is not None:
+            self._retranslate_worker.wait()
 
