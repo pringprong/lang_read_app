@@ -23,7 +23,7 @@ class ScriptedLlm:
         self.calls: list[str] = []
         self.omit_new_on_calls = omit_new_on_calls or set()
 
-    def chat(self, prompt: str) -> str:
+    def chat(self, prompt: str, temperature: float | None = None) -> str:
         self.calls.append(prompt)
         call_number = len(self.calls)
         if prompt.startswith("FINAL:"):
@@ -177,7 +177,7 @@ def test_retry_failure_keeps_earlier_text(conn):
     class FlakyRetryLlm(ScriptedLlm):
         """Omits the first-use word, then the retry call raises LlmError."""
 
-        def chat(self, prompt: str) -> str:
+        def chat(self, prompt: str, temperature: float | None = None) -> str:
             if "MUST contain" in prompt:
                 raise LlmError("model returned an empty message")
             # return text without the new word (no "我们学X。" sentence)

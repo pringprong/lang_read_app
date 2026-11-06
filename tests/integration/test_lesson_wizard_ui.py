@@ -142,7 +142,7 @@ def test_wizard_retry_after_generation_failure(qapp, conn, monkeypatch):
     from langread.services.llm_client import LlmError
 
     class FailingLlm:
-        def chat(self, prompt: str) -> str:
+        def chat(self, prompt: str, temperature: float | None = None) -> str:
             raise LlmError("model returned an empty message")
 
     monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: None)

@@ -166,11 +166,13 @@ def test_save_lesson_full_pipeline(env):
         word = words.get_by_text(text)
         assert [t.name for t in words.topics_for_word(word.id)] == ["Cooking"]
 
-    # audio: one file, one TTS call per paragraph, valid MP3 (D-1)
+    # audio: one file, one TTS call per sentence (uniform speaking pace),
+    # valid MP3 (D-1) — the env draft stores each paragraph as one row
+    # containing two sentences, so 6 rows × 2 sentences = 12 calls
     audio_file = audio_dir / f"lesson_{lesson.id}.mp3"
     assert audio_file.exists()
     assert looks_like_mp3(audio_file.read_bytes())
-    assert len(saver.tts.calls) == 6
+    assert len(saver.tts.calls) == 12
 
     # progress covered all stages
     stages = {stage for stage, _c, _t in progress_calls}
@@ -261,6 +263,36 @@ def test_hsk_link_promoted_to_learned(env):
     assert HskRepo(conn).find_by_text(hsk_word)[0].app_state == "learned"
 
 
+def test_audio_one_tts_call_per_sentence(env):
+    """Regression: audio is synthesized sentence by sentence, not paragraph
+    by paragraph. TTS servers (Kokoro) speak longer single requests faster,
+    so the 5-sentence final paragraph (§6.4) played noticeably faster than
+    the 3-sentence paragraphs when a whole paragraph was one request."""
+    conn, topic_id, _draft, audio_dir = env
+    paragraphs = [
+        GeneratedParagraph(index=0, text="句子一。句子二。句子三。",
+                           sentences=["句子一。", "句子二。", "句子三。"],
+                           segmentations=[["句子一"], ["句子二"], ["句子三"]]),
+        GeneratedParagraph(index=1,
+                           text="句子一。句子二。句子三。句子四。句子五。",
+                           sentences=["句子一。", "句子二。", "句子三。",
+                                      "句子四。", "句子五。"],
+                           segmentations=[["句子一"], ["句子二"], ["句子三"],
+                                          ["句子四"], ["句子五"]]),
+    ]
+    draft = LessonDraft(topic_id=topic_id, topic_name="Cooking",
+                        new_words=[], review_words=[], paragraphs=paragraphs)
+    stub = TtsStub()
+    saver = _saver(conn, audio_dir, stub, TranslationStub())
+    lesson = saver.save_lesson(draft)
+
+    assert lesson.status == "complete"
+    # one call per sentence: 3 + 5 — never one call per whole paragraph
+    assert len(stub.calls) == 8
+    assert all(text.count("。") == 1 for text in stub.calls)
+    assert stub.calls[:3] == ["句子一。", "句子二。", "句子三。"]
+
+
 def test_save_lesson_with_wav_tts(env):
     """A TTS server returning WAV still produces a valid single lesson
     audio file (properly merged), stored with the .wav extension."""
@@ -286,7 +318,8 @@ def test_save_lesson_with_wav_tts(env):
 
     data = audio_file.read_bytes()
     assert detect_audio_format(data) == "wav"
-    # 6 paragraphs merged into one file: data payload = 6 × 100 samples × 2 bytes
-    assert data[44:] == make_wav(100)[44:] * 6
+    # 6 rows × 2 sentences each = 12 calls, merged into one file:
+    # data payload = 12 × 100 samples × 2 bytes
+    assert data[44:] == make_wav(100)[44:] * 12
 
 

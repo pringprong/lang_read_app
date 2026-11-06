@@ -89,7 +89,7 @@ Environment notes:
 
 - [x] `pytest` passes: 149 total (13 new — translation service, save pipeline, end-to-end wizard save).
 - [x] `services/translation.py`: sentence translation + word pinyin/definition via templates; **pypinyin offline fallback** for pinyin; tolerant of bad JSON (returns None rather than failing).
-- [x] `TtsService.synthesize_texts_to_file`: per-paragraph synthesis (avoids request-size limits) concatenated into the single lesson MP3 (D-1).
+- [x] `services/lesson_saver.py` `_generate_audio`: **per-sentence synthesis** concatenated into the single lesson MP3 (D-1). Was per-paragraph, but Kokoro speaks longer single requests faster, so the long 5-sentence final paragraph (§6.4) played noticeably faster than the rest — fixed by splitting every TTS request to one sentence (verified live: ~3.5–3.7 chars/s per sentence vs 4.9 for the whole-paragraph call).
 - [x] `services/lesson_saver.py` (§7.9): lesson + sentences + lesson_words creation → translations → word promotion (pinyin/definition + HSK linking + New→Learned with initial SRS) → review-word SRS exposure → audio → complete.
 - [x] **Resumable**: every step idempotent; an interrupted save leaves `status='incomplete'` and `finalize_lesson` completes it without duplicating or re-exposing.
 - [x] TTS is required (clear `SaveError` when unconfigured); translation is optional (sentences stay NULL, words fall back to pypinyin).

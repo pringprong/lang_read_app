@@ -8,7 +8,9 @@ Steps (each idempotent, so an interrupted save can be resumed by re-running
   C. word promotion: new words gain pinyin/definition (translation model,
      pypinyin fallback), move New→Learned with an initial SRS state
   D. SRS exposure updates for the review words
-  E. one MP3 for the whole lesson (one TTS call per paragraph, concatenated)
+  E. one MP3 for the whole lesson (one TTS call per sentence, concatenated;
+     Kokoro's speaking pace rises with the length of a single request, so
+     whole-paragraph requests made long paragraphs play noticeably faster)
   F. mark the lesson 'complete'
 """
 
@@ -20,7 +22,7 @@ from pathlib import Path
 
 from langread.db.repositories import HskRepo, LessonsRepo, SentencesRepo, WordsRepo
 from langread.models import Lesson, Sentence
-from langread.services.generation import LessonDraft
+from langread.services.generation import LessonDraft, split_sentences
 from langread.services.srs import SrsService
 from langread.services.translation import TranslationService, pinyin_fallback
 from langread.services.tts import (
@@ -214,15 +216,16 @@ class LessonSaver:
         if existing is not None:
             self.lessons.set_audio_path(lesson_id, existing.name)
             return  # already synthesized (resume)
-        paragraphs = self._paragraph_texts(lesson_id)
+        paragraphs = self._sentence_texts(lesson_id)
         chunks: list[bytes] = []
-        for i, text in enumerate(paragraphs):
+        for i, texts in enumerate(paragraphs):
             if progress:
                 progress("audio", i + 1, len(paragraphs))
-            try:
-                chunks.append(self.tts.synthesize(text))
-            except Exception as exc:
-                raise SaveError(f"audio generation failed: {exc}") from exc
+            for text in texts:
+                try:
+                    chunks.append(self.tts.synthesize(text))
+                except Exception as exc:
+                    raise SaveError(f"audio generation failed: {exc}") from exc
         audio_format = detect_audio_format(chunks[0]) if chunks else None
         if audio_format is None:
             raise SaveError("TTS produced unrecognized audio data")
@@ -300,9 +303,18 @@ class LessonSaver:
         self.lessons.delete(lesson_id)
         return demoted
 
-    def _paragraph_texts(self, lesson_id: int) -> list[str]:
+    def _sentence_texts(self, lesson_id: int) -> list[list[str]]:
+        """The lesson's texts grouped per paragraph, one item per sentence.
+
+        Each stored sentence row is (re-)split on sentence enders so every
+        TTS request carries exactly one sentence: TTS servers such as Kokoro
+        speak longer single requests faster, so synthesizing a whole
+        paragraph at once made long paragraphs (notably the 5-sentence final
+        paragraph, §6.4) play noticeably faster than the rest of the lesson.
+        """
         sentences = self.sentences.list_for_lesson(lesson_id)
         paragraphs: dict[int, list[str]] = {}
         for sentence in sentences:
-            paragraphs.setdefault(sentence.para_index, []).append(sentence.text)
-        return ["".join(texts) for _index, texts in sorted(paragraphs.items())]
+            parts = split_sentences(sentence.text) or [sentence.text]
+            paragraphs.setdefault(sentence.para_index, []).extend(parts)
+        return [texts for _index, texts in sorted(paragraphs.items())]
