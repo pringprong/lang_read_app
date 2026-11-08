@@ -227,7 +227,7 @@ class GenerationService:
         A retry that itself fails (e.g. an empty reply from a reasoning
         model) keeps the earlier usable text instead of failing the lesson.
         """
-        text = _clean_reply(self.llm.chat(prompt, temperature=1.4))
+        text = _clean_reply(self.llm.chat(prompt, temperature=1.2))
         used = self._usage_of(text, requested)
         retries = 0
         while first_use is not None and first_use not in used and retries < 2:
@@ -237,7 +237,7 @@ class GenerationService:
                 "exactly. Rewrite the paragraph with it."
             )
             try:
-                retry_text = _clean_reply(self.llm.chat(retry_prompt, temperature=1.3))
+                retry_text = _clean_reply(self.llm.chat(retry_prompt, temperature=1.1))
             except LlmError:
                 break  # keep the earlier text; the word is simply missing
             text = retry_text
