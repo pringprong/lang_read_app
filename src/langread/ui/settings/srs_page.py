@@ -1,4 +1,8 @@
-"""Spaced repetition parameters page (requirements §11, §12.1 item 7)."""
+"""Spaced repetition parameters page (requirements §11, §12.1 item 7).
+
+Renders every field of `SrsParams` automatically — int fields as spin boxes,
+float fields as double spin boxes — with tooltips from PARAM_HELP.
+"""
 
 from __future__ import annotations
 
@@ -10,24 +14,43 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QLabel,
     QPushButton,
+    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
 
-from langread.services.srs import SrsParams, SrsService
+from langread.services.srs import INT_PARAM_FIELDS, SrsParams, SrsService
 
 PARAM_HELP = {
     "initial_ease": "Starting easiness factor (Anki uses 2.5).",
-    "initial_interval_days": "Days until a newly learned word first returns.",
-    "exposure_multiplier": "Interval growth when a word is merely used in a new lesson.",
-    "easy_bonus": "Extra interval multiplier when rated 'easy'.",
     "ease_delta_easy": "Ease change when rated 'easy'.",
     "ease_delta_difficult": "Ease change when rated 'difficult'.",
-    "relearn_interval_days": "Interval right after a 'difficult' rating.",
-    "min_interval_days": "Shortest normal interval (relearn step is exempt).",
-    "max_interval_days": "Longest interval between exposures.",
     "ease_min": "Lower bound for the easiness factor.",
     "ease_max": "Upper bound for the easiness factor.",
+    "learned_words_per_paragraph": (
+        "Learned words suggested to each paragraph's prompt."
+    ),
+    "novelty_window_lessons": (
+        "Lessons after first learning during which a word stays boosted."
+    ),
+    "staleness_target_lessons": (
+        "Lessons without an appearance after which a word is fully 'stale' "
+        "(maximum return priority)."
+    ),
+    "weight_novelty": (
+        "Weight of factor 1: how recently the word was first learned."
+    ),
+    "weight_staleness": (
+        "Weight of factor 2: how long since the word last actually appeared "
+        "(the core of spaced repetition)."
+    ),
+    "weight_difficulty": (
+        "Weight of factor 3: your difficult/easy ratings (least important)."
+    ),
+    "same_lesson_cooldown_paragraphs": (
+        "Paragraphs a word waits before it can be suggested again within the "
+        "same lesson (0 = once per lesson)."
+    ),
 }
 
 
@@ -38,12 +61,16 @@ class SrsPage(QWidget):
         self.service = SrsService(conn)
 
         form = QFormLayout()
-        self._spinners: dict[str, QDoubleSpinBox] = {}
+        self._spinners: dict[str, QSpinBox | QDoubleSpinBox] = {}
         for f in fields(SrsParams):
-            spin = QDoubleSpinBox()
-            spin.setDecimals(2)
-            spin.setRange(0.05, 2000.0)
-            spin.setSingleStep(0.05)
+            if f.name in INT_PARAM_FIELDS:
+                spin: QSpinBox | QDoubleSpinBox = QSpinBox()
+                spin.setRange(0, 100)
+            else:
+                spin = QDoubleSpinBox()
+                spin.setDecimals(2)
+                spin.setRange(0.0, 2000.0)
+                spin.setSingleStep(0.05)
             spin.setToolTip(PARAM_HELP.get(f.name, ""))
             self._spinners[f.name] = spin
             label_text = f.name.replace("_", " ")
@@ -66,6 +93,12 @@ class SrsPage(QWidget):
             spin.setValue(float(getattr(params, name)))
 
     def _save(self) -> None:
-        params = SrsParams(**{n: s.value() for n, s in self._spinners.items()})
+        values = {}
+        for name, spin in self._spinners.items():
+            value: float | int = spin.value()
+            if name in INT_PARAM_FIELDS:
+                value = int(value)
+            values[name] = value
+        params = SrsParams(**values)
         self.service.set_params(params)
         self.status.setText("Saved.")

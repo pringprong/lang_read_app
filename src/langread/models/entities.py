@@ -51,11 +51,12 @@ class Word:
     definition_source: str | None = None  # 'dictionary'|'llm'|'hsk'|'manual'
     # SRS state (meaningful when list_state == 'learned'):
     ease: float = 2.5
-    interval_days: float | None = None
-    due_at: str | None = None
     reps: int = 0
     lapses: int = 0
     last_rated_at: str | None = None
+    # lesson-frequency SRS (schema v4):
+    first_learned_lesson_id: int | None = None  # lesson that introduced it
+    last_seen_lesson_id: int | None = None      # last lesson it actually appeared in
 
 
 @dataclass(frozen=True)

@@ -46,17 +46,23 @@ class WordSelectPage(QWidget):
         new_layout.addWidget(self.new_list)
         layout.addWidget(new_group)
 
-        review_group = QGroupBox("Review words (previously learned, due for review)")
+        review_group = QGroupBox("Review words (automatic — spaced repetition)")
         review_layout = QVBoxLayout(review_group)
-        self.review_list = QListWidget()
-        for word in suggested_review:
-            item = QListWidgetItem(word)
-            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-            item.setCheckState(Qt.CheckState.Checked if suggested_review else Qt.CheckState.Unchecked)
-            if suggested_review:
-                item.setCheckState(Qt.CheckState.Unchecked)
-            self.review_list.addItem(item)
-        review_layout.addWidget(self.review_list)
+        review_hint = QLabel(
+            "Words from the Learned list are woven into every paragraph "
+            "automatically: words learned recently, words that have not "
+            "appeared for a while, and words you rated as difficult are the "
+            "most likely to return. No selection needed."
+        )
+        review_hint.setWordWrap(True)
+        review_layout.addWidget(review_hint)
+        if suggested_review:
+            preview_label = QLabel("Currently most likely to return:")
+            review_layout.addWidget(preview_label)
+            self.review_list = QListWidget()
+            for word in suggested_review:
+                self.review_list.addItem(QListWidgetItem(word))
+            review_layout.addWidget(self.review_list)
         layout.addWidget(review_group)
 
         para_group = QGroupBox("Lesson length")
@@ -87,9 +93,6 @@ class WordSelectPage(QWidget):
 
     def selected_new(self) -> list[str]:
         return self.checked(self.new_list)
-
-    def selected_review(self) -> list[str]:
-        return self.checked(self.review_list)
 
     def paragraph_count(self) -> int:
         return self.paragraph_spin.value()

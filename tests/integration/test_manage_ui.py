@@ -48,9 +48,13 @@ def env(tmp_path, monkeypatch):
     srs = SrsService(conn)
     for text in NEW:
         words.get_or_create(text, list_state="new", source="manual")
+    # the review words were learned in a PRIOR lesson of ANOTHER topic
+    # (the lesson-frequency SRS counts lessons globally across topics)
+    prior_topic = TopicsRepo(conn).create("Earlier lessons")
+    anchor = LessonsRepo(conn).create(topic_id=prior_topic.id)
     for text in REVIEW:
         word, _ = words.get_or_create(text, list_state="new", source="manual")
-        srs.promote_word(word.id, now="2026-11-01T00:00:00+00:00")
+        srs.promote_word(word.id, anchor.id)
 
     segmentation = SegmentationService(conn)
     audio_dir = tmp_path / "appdata" / "audio"

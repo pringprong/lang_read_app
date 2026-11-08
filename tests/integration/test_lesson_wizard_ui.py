@@ -76,7 +76,7 @@ def test_generate_page_runs_worker_to_completion(qapp, conn):
     page = GeneratePage(db_file, topic_id, llm=ScriptedLlm())
     results = []
     page.generation_finished.connect(lambda draft: results.append(draft))
-    page.start(NEW, REVIEW, 6)
+    page.start(NEW, 6)
     page.wait_for_worker()
     for _ in range(10):
         qapp.processEvents()  # let queued signals reach their slots
@@ -90,7 +90,7 @@ def test_generate_page_runs_worker_to_completion(qapp, conn):
 def test_final_edit_page_text_and_segmentation_editing(qapp, conn):
     _conn, topic_id, _db_file = conn
     service = GenerationService(_conn, llm=ScriptedLlm())
-    draft = service.generate_lesson(topic_id, NEW, REVIEW, 6)
+    draft = service.generate_lesson(topic_id, NEW, 6)
     page = FinalEditPage(_conn)
     page.set_draft(draft, SegmentationService(_conn))
     assert page.tabs.count() == 6

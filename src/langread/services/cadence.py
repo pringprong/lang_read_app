@@ -1,15 +1,18 @@
 """Cadence planner (requirements §6, §7.6).
 
-Pure logic: given the lesson's new words, review words, and paragraph count,
-decide which words each paragraph's prompt should request, and track actual
-usage so later paragraphs repeat the least-used words.
+Pure logic: given the lesson's new words and paragraph count, decide which
+words each paragraph's prompt should request, and track actual usage so
+later paragraphs repeat the least-used words.
 
 Rules enforced:
 - at most one first-use new word per paragraph (§6.2)
 - no first-use new word in the final paragraph (§6.4)
 - the final paragraph must use ALL new words (§6.4)
 - repeats prefer previously introduced words with the lowest usage (§6.3)
-- review words rotate through the list
+
+Review (Learned) words are NOT planned here anymore: the lesson-frequency
+SRS selector (services/srs.py) picks a few per paragraph; the generation
+service passes them into `plan_paragraph`.
 
 Note: |new words| must be < paragraph count, so the wizard allows up to 12
 paragraphs when 10 new words are selected (a documented deviation from the
@@ -36,9 +39,8 @@ class ParagraphPlan:
 
 
 class CadencePlanner:
-    def __init__(self, new_words: list[str], review_words: list[str],
-                 n_paragraphs: int, *, max_repeats: int = 3,
-                 max_review: int = 2) -> None:
+    def __init__(self, new_words: list[str], n_paragraphs: int, *,
+                 max_repeats: int = 3) -> None:
         if not 5 <= len(new_words) <= 10:
             raise CadenceError(
                 f"a lesson introduces 5–10 new words (got {len(new_words)})"
@@ -50,18 +52,17 @@ class CadencePlanner:
                 "introduces no new words"
             )
         self.new_words = list(new_words)
-        self.review_words = list(review_words)
         self.n_paragraphs = n_paragraphs
         self.max_repeats = max_repeats
-        self.max_review = max_review
-        self._usage: dict[str, int] = {w: 0 for w in new_words + review_words}
-        self._review_cursor = 0
+        self._usage: dict[str, int] = {w: 0 for w in new_words}
 
     # ---- planning ----
 
-    def plan_paragraph(self, index: int) -> ParagraphPlan:
+    def plan_paragraph(self, index: int,
+                       review_words: list[str] | None = None) -> ParagraphPlan:
         if not 0 <= index < self.n_paragraphs:
             raise CadenceError(f"paragraph index out of range: {index}")
+        review_words = list(review_words or [])
 
         if index == self.n_paragraphs - 1:
             return ParagraphPlan(
@@ -69,7 +70,7 @@ class CadencePlanner:
                 is_final=True,
                 first_use=None,
                 repeat_words=[],
-                review_words=self._next_review(),
+                review_words=review_words,
                 all_new_words=list(self.new_words),
             )
 
@@ -82,17 +83,8 @@ class CadencePlanner:
             is_final=False,
             first_use=first_use,
             repeat_words=repeats,
-            review_words=self._next_review(),
+            review_words=review_words,
         )
-
-    def _next_review(self) -> list[str]:
-        if not self.review_words or self.max_review <= 0:
-            return []
-        chosen: list[str] = []
-        for _ in range(min(self.max_review, len(self.review_words))):
-            chosen.append(self.review_words[self._review_cursor % len(self.review_words)])
-            self._review_cursor += 1
-        return chosen
 
     # ---- usage tracking (§7.6) ----
 

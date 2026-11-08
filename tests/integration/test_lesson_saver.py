@@ -58,17 +58,22 @@ def env(tmp_path):
     srs = SrsService(conn)
     for text in NEW:
         words.get_or_create(text, list_state="new", source="manual")
+    # the review words were learned in a PRIOR lesson (the anchor lesson)
+    anchor = LessonsRepo(conn).create(topic_id=topic.id)
     for text in REVIEW:
         word, _ = words.get_or_create(text, list_state="new", source="manual")
-        srs.promote_word(word.id, now="2026-11-01T00:00:00+00:00")
+        srs.promote_word(word.id, anchor.id)
 
     # a draft that mirrors what the generation pipeline produces
+    from langread.services.segmentation import SegmentationService
+
+    segmentation = SegmentationService(conn)  # dict has NEW/REVIEW words
     paragraphs = []
     for i in range(6):
         text = f"我们学{NEW[i] if i < 5 else '东西'}。{REVIEW[i % 2]}也很有用。"
         paragraphs.append(GeneratedParagraph(
             index=i, text=text, sentences=[text],
-            segmentations=[[c for c in text]],
+            segmentations=[segmentation.token_texts(text)],
         ))
     draft = LessonDraft(
         topic_id=topic.id, topic_name=topic.name,
@@ -131,7 +136,8 @@ def test_save_lesson_full_pipeline(env):
 
     assert lesson.status == "complete"
     assert lesson.topic_id == topic_id
-    assert lesson.order_index == 1
+    assert lesson.order_index == 2  # the anchor lesson (where the review
+    #                          words were learned) took order_index 1
     assert lesson.audio_path == f"lesson_{lesson.id}.mp3"
 
     # sentences stored with translations and segmentations
@@ -147,12 +153,20 @@ def test_save_lesson_full_pipeline(env):
         assert word.list_state == "learned"
         assert word.pinyin == f"PIN[{text}]"
         assert word.definition == f"DEF[{text}]"
-        assert word.interval_days == 1.0 and word.reps == 1
+        assert word.ease == 2.5
+        assert word.first_learned_lesson_id == lesson.id
+        assert word.last_seen_lesson_id == lesson.id
 
-    # review words got exposure growth (§7.9.4): interval 1 → 2.5
-    for text in REVIEW:
+    # review words actually APPEARED: appearances recorded per paragraph,
+    # last_seen advanced to this lesson (lesson-frequency SRS exposure)
+    lessons = LessonsRepo(conn)
+    appearance_pairs = set(lessons.appearances_for_lesson(lesson.id))
+    for i, text in enumerate(REVIEW):
         word = words.get_by_text(text)
-        assert word.interval_days == pytest.approx(2.5)
+        assert word.last_seen_lesson_id == lesson.id
+        # appears in its paragraphs (REVIEW[0] → 0, 2, 4; REVIEW[1] → 1, 3, 5)
+        assert (word.id, i) in appearance_pairs
+        assert (word.id, i + 2) in appearance_pairs
 
     # lesson_words roles recorded
     roles = dict((r[1], r[2]) for r in LessonsRepo(conn).lesson_words(lesson.id))
@@ -185,13 +199,15 @@ def test_finalize_is_idempotent(env):
     lesson = saver.save_lesson(draft)
     sentences_before = SentencesRepo(conn).count_for_lesson(lesson.id)
     review_word = WordsRepo(conn).get_by_text(REVIEW[0])
-    interval_before = review_word.interval_days
+    last_seen_before = review_word.last_seen_lesson_id
+    appearances_before = LessonsRepo(conn).appearances_for_lesson(lesson.id)
 
     # second run: no-op, nothing duplicated, no re-exposure
     again = saver.finalize_lesson(lesson.id)
     assert again.id == lesson.id and again.status == "complete"
     assert SentencesRepo(conn).count_for_lesson(lesson.id) == sentences_before
-    assert WordsRepo(conn).get_by_text(REVIEW[0]).interval_days == interval_before
+    assert WordsRepo(conn).get_by_text(REVIEW[0]).last_seen_lesson_id == last_seen_before
+    assert LessonsRepo(conn).appearances_for_lesson(lesson.id) == appearances_before
 
 
 def test_interrupted_save_is_resumable(env):
@@ -217,8 +233,8 @@ def test_interrupted_save_is_resumable(env):
     finished = working.finalize_lesson(lesson.id)
     assert finished.status == "complete"
     assert (audio_dir / f"lesson_{lesson.id}.mp3").exists()
-    # words not re-promoted, review not re-exposed (already done pre-failure)
-    assert WordsRepo(conn).get_by_text(NEW[0]).reps == 1
+    # words not re-promoted: the lesson tracking is unchanged
+    assert WordsRepo(conn).get_by_text(NEW[0]).first_learned_lesson_id == lesson.id
 
 
 def test_tts_required_for_save(env):
@@ -323,3 +339,51 @@ def test_save_lesson_with_wav_tts(env):
     assert data[44:] == make_wav(100)[44:] * 12
 
 
+
+
+def test_appearances_follow_the_final_text(env):
+    """Apex behavior of the appearance step: what is recorded follows the
+    FINAL (hand-edited) text — a learned word removed while editing is NOT
+    an exposure, and a different learned word typed in IS one."""
+    from langread.services.segmentation import SegmentationService
+    from langread.services.srs import SrsService
+
+    conn, topic_id, draft, audio_dir = env
+    words = WordsRepo(conn)
+    lessons = LessonsRepo(conn)
+    srs = SrsService(conn)
+
+    # a third learned word the original draft never mentions
+    extra, _ = words.get_or_create("咕复三", list_state="new", source="manual")
+    anchor = lessons.create(topic_id=topic_id)
+    srs.promote_word(extra.id, anchor.id)
+    removed_last_seen_before = words.get_by_text(REVIEW[0]).last_seen_lesson_id
+
+    # hand edits (wizard step 3): REVIEW[0] removed from every paragraph,
+    # paragraph 1 gains the extra learned word
+    from langread.services.generation import split_sentences
+
+    segmentation = SegmentationService(conn)
+    for paragraph in draft.paragraphs:
+        paragraph.text = paragraph.text.replace(f"{REVIEW[0]}也很有用。", "")
+        paragraph.sentences = split_sentences(paragraph.text)
+        paragraph.segmentations = [
+            segmentation.token_texts(s) for s in paragraph.sentences
+        ]
+    p1 = draft.paragraphs[1]
+    p1.text = f"我们学{NEW[1]}。咕复三也很有用。"
+    p1.sentences = [p1.text]
+    p1.segmentations = [segmentation.token_texts(p1.text)]
+
+    lesson = _saver(conn, audio_dir, TtsStub(), TranslationStub()).save_lesson(draft)
+    pairs = set(lessons.appearances_for_lesson(lesson.id))
+
+    removed = words.get_by_text(REVIEW[0])
+    assert removed.id not in {word_id for word_id, _para in pairs}
+    assert removed.last_seen_lesson_id == removed_last_seen_before  # unchanged
+    roles = dict((r[1], r[2]) for r in lessons.lesson_words(lesson.id))
+    assert removed.id not in roles
+
+    assert (extra.id, 1) in pairs
+    assert roles[extra.id] == "review"
+    assert words.get_by_text("咕复三").last_seen_lesson_id == lesson.id

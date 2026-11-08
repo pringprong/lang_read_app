@@ -116,3 +116,31 @@ class LessonsRepo:
                 "VALUES (?, ?, ?)",
                 (lesson_id, word_id, role),
             )
+
+    def add_appearance(self, lesson_id: int, word_id: int,
+                       para_index: int) -> None:
+        """Record an actual appearance of a learned word in one paragraph
+        (schema v4; idempotent)."""
+        with transaction(self.conn):
+            self.conn.execute(
+                "INSERT OR IGNORE INTO word_appearances "
+                "(word_id, lesson_id, para_index) VALUES (?, ?, ?)",
+                (word_id, lesson_id, para_index),
+            )
+
+    def appearances_for_lesson(self, lesson_id: int) -> list[tuple[int, int]]:
+        """Rows of (word_id, para_index) for the lesson, paragraph order."""
+        rows = self.conn.execute(
+            "SELECT word_id, para_index FROM word_appearances "
+            "WHERE lesson_id = ? ORDER BY para_index, word_id",
+            (lesson_id,),
+        ).fetchall()
+        return [(r[0], r[1]) for r in rows]
+
+    def next_lesson_no(self) -> int:
+        """The lesson number the NEXT created lesson will get (global
+        sequence = lessons.id; the lesson-frequency SRS clock)."""
+        row = self.conn.execute(
+            "SELECT COALESCE(MAX(id), 0) FROM lessons"
+        ).fetchone()
+        return int(row[0]) + 1

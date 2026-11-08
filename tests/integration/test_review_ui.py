@@ -44,9 +44,20 @@ def env(tmp_path, monkeypatch):
     srs = SrsService(conn)
     for text in NEW:
         words.get_or_create(text, list_state="new", source="manual")
+    # the review words were learned in a PRIOR lesson of ANOTHER topic
+    # (the lesson-frequency SRS counts lessons globally across topics)
+    from langread.db.repositories import SentencesRepo
+    from langread.models import Sentence
+
+    prior_topic = TopicsRepo(conn).create("Earlier lessons")
+    anchor = LessonsRepo(conn).create(topic_id=prior_topic.id)
+    SentencesRepo(conn).replace_for_lesson(anchor.id, [
+        Sentence(id=0, lesson_id=anchor.id, para_index=0, sent_index=0,
+                 text="旧课复习。", segmentation=["旧课", "复习"]),
+    ])
     for text in REVIEW:
         word, _ = words.get_or_create(text, list_state="new", source="manual")
-        srs.promote_word(word.id, now="2026-11-01T00:00:00+00:00")
+        srs.promote_word(word.id, anchor.id)
 
     paragraphs = []
     from langread.services.segmentation import SegmentationService
@@ -72,8 +83,8 @@ def test_lesson_list_shows_lessons_and_review_dates(qapp, env, monkeypatch):
     conn, _topic_id, _lesson_id = env
     monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: None)
     dialog = LessonListDialog(conn)
-    assert dialog.topic_combo.count() == 1
-    assert dialog.table.rowCount() == 1
+    assert dialog.topic_combo.count() == 2  # Cooking + the prior-lessons topic
+    assert dialog.table.rowCount() == 1  # Cooking selected: only its lesson
     assert dialog.table.item(0, 2).text() == "never reviewed"
     assert dialog.review_button.isEnabled()
     assert not dialog.finish_button.isEnabled()  # lesson is complete
@@ -247,7 +258,7 @@ def test_word_review_complete_and_cancel(qapp, env, monkeypatch):
     window.review_page.set_rating(0, "difficult")
     window.review_page.set_rating(1, "easy")
     word_rows = window.review_page._words
-    interval_before = {w.id: w.interval_days for w in word_rows}
+    ease_before = {w.id: w.ease for w in word_rows}
     window._complete_review(open_next=False)
 
     events = srs.reviews.events_for_lesson(lesson_id)
@@ -256,12 +267,14 @@ def test_word_review_complete_and_cancel(qapp, env, monkeypatch):
     assert ratings[word_rows[0].id] == "difficult"
     assert ratings[word_rows[1].id] == "easy"
     assert ratings[word_rows[2].id] == "standard"  # default
-    # SRS applied: difficult → short interval; easy → bigger growth
+    # SRS applied: difficult → ease down + lapse; easy → ease up + rep
     words = WordsRepo(conn)
     difficult_word = words.get(word_rows[0].id)
     easy_word = words.get(word_rows[1].id)
-    assert difficult_word.interval_days == 0.5
-    assert easy_word.interval_days > interval_before[easy_word.id]
+    assert difficult_word.ease == pytest.approx(2.3)
+    assert difficult_word.lapses == 1
+    assert easy_word.ease == pytest.approx(2.65)
+    assert easy_word.ease > ease_before[easy_word.id]
     assert lessons.get(lesson_id).last_reviewed_at is not None
     window.close()
 

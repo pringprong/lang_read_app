@@ -23,14 +23,12 @@ class GenerationWorker(QThread):
     failed = Signal(str)            # error message
 
     def __init__(self, db_path, llm, topic_id: int,
-                 new_words: list[str], review_words: list[str],
-                 n_paragraphs: int, parent=None) -> None:
+                 new_words: list[str], n_paragraphs: int, parent=None) -> None:
         super().__init__(parent)
         self._db_path = db_path
         self._llm = llm
         self._topic_id = topic_id
         self._new_words = new_words
-        self._review_words = review_words
         self._n_paragraphs = n_paragraphs
 
     def run(self) -> None:
@@ -38,8 +36,7 @@ class GenerationWorker(QThread):
         try:
             service = GenerationService(conn, llm=self._llm)
             draft = service.generate_lesson(
-                self._topic_id, self._new_words, self._review_words,
-                self._n_paragraphs,
+                self._topic_id, self._new_words, self._n_paragraphs,
                 progress=lambda index, text: self.progress.emit(index, text),
             )
         except Exception as exc:  # noqa: BLE001 - forwarded to the UI
@@ -169,12 +166,11 @@ class GeneratePage(QWidget):
         layout.addWidget(self.status)
         layout.addWidget(self.progress_list)
 
-    def start(self, new_words: list[str], review_words: list[str],
-              n_paragraphs: int) -> None:
+    def start(self, new_words: list[str], n_paragraphs: int) -> None:
         self.progress_list.clear()
         self.status.setText("Generating… one paragraph at a time.")
         self._worker = GenerationWorker(
-            self._db_path, self._llm, self._topic_id, new_words, review_words,
+            self._db_path, self._llm, self._topic_id, new_words,
             n_paragraphs, parent=self,
         )
         self._worker.progress.connect(self._on_progress)

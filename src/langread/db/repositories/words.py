@@ -28,11 +28,11 @@ class WordsRepo:
             added_at=row["added_at"],
             definition_source=row["definition_source"],
             ease=row["ease"],
-            interval_days=row["interval_days"],
-            due_at=row["due_at"],
             reps=row["reps"],
             lapses=row["lapses"],
             last_rated_at=row["last_rated_at"],
+            first_learned_lesson_id=row["first_learned_lesson_id"],
+            last_seen_lesson_id=row["last_seen_lesson_id"],
         )
 
     def get(self, word_id: int) -> Word | None:
@@ -132,14 +132,65 @@ class WordsRepo:
                 (pinyin, definition, definition_source, word_id),
             )
 
-    def set_srs(self, word_id: int, *, ease: float, interval_days: float | None,
-                due_at: str | None, reps: int, lapses: int,
+    def set_srs(self, word_id: int, *, ease: float, reps: int, lapses: int,
                 last_rated_at: str | None) -> None:
         with transaction(self.conn):
             self.conn.execute(
-                "UPDATE words SET ease = ?, interval_days = ?, due_at = ?, "
-                "reps = ?, lapses = ?, last_rated_at = ? WHERE id = ?",
-                (ease, interval_days, due_at, reps, lapses, last_rated_at, word_id),
+                "UPDATE words SET ease = ?, reps = ?, lapses = ?, "
+                "last_rated_at = ? WHERE id = ?",
+                (ease, reps, lapses, last_rated_at, word_id),
+            )
+
+    def set_lesson_track(self, word_id: int, *,
+                         first_learned_lesson_id: int | None = None,
+                         last_seen_lesson_id: int | None = None) -> None:
+        """Set the lesson-frequency SRS tracking columns (only the values
+        that are not None are updated)."""
+        with transaction(self.conn):
+            if first_learned_lesson_id is not None:
+                self.conn.execute(
+                    "UPDATE words SET first_learned_lesson_id = ? WHERE id = ?",
+                    (first_learned_lesson_id, word_id),
+                )
+            if last_seen_lesson_id is not None:
+                self.conn.execute(
+                    "UPDATE words SET last_seen_lesson_id = ? WHERE id = ?",
+                    (last_seen_lesson_id, word_id),
+                )
+
+    def clear_lesson_track(self, word_id: int) -> None:
+        """Reset the lesson tracking columns (lesson delete → word demoted)."""
+        with transaction(self.conn):
+            self.conn.execute(
+                "UPDATE words SET first_learned_lesson_id = NULL, "
+                "last_seen_lesson_id = NULL WHERE id = ?",
+                (word_id,),
+            )
+
+    def reset_lesson_references(self, lesson_id: int) -> None:
+        """NULL out tracking columns pointing at a lesson that is about to be
+        deleted (the words FK has no ON DELETE action; appearance rows
+        cascade instead)."""
+        with transaction(self.conn):
+            self.conn.execute(
+                "UPDATE words SET first_learned_lesson_id = NULL "
+                "WHERE first_learned_lesson_id = ?",
+                (lesson_id,),
+            )
+            self.conn.execute(
+                "UPDATE words SET last_seen_lesson_id = NULL "
+                "WHERE last_seen_lesson_id = ?",
+                (lesson_id,),
+            )
+
+    def set_last_seen_lesson(self, word_id: int, lesson_id: int) -> None:
+        """Record an actual appearance: last_seen only ever moves FORWARD
+        (max guard), so re-running an idempotent save step is harmless."""
+        with transaction(self.conn):
+            self.conn.execute(
+                "UPDATE words SET last_seen_lesson_id = "
+                "MAX(COALESCE(last_seen_lesson_id, 0), ?) WHERE id = ?",
+                (lesson_id, word_id),
             )
 
     def associate_topic(self, word_id: int, topic_id: int) -> None:
@@ -172,27 +223,4 @@ class WordsRepo:
             "ORDER BY (wt.topic_id IS NULL), w.added_at, w.id LIMIT ?"
         )
         rows = self.conn.execute(sql, (topic_id, limit)).fetchall()
-        return [self._row_to_word(r) for r in rows]
-
-    def due_learned_words(self, topic_id: int | None = None,
-                          limit: int | None = None,
-                          now_iso: str | None = None) -> list[Word]:
-        """Learned words ordered by due date (SRS suggestions, §7.2)."""
-        params: list = []
-        where = "w.list_state = 'learned' AND w.due_at IS NOT NULL"
-        if now_iso is not None:
-            where += " AND w.due_at <= ?"
-            params.append(now_iso)
-        if topic_id is not None:
-            join = "LEFT JOIN word_topics wt ON wt.word_id = w.id AND wt.topic_id = ?"
-            params.insert(0, topic_id)
-            order = "(wt.topic_id IS NULL), w.due_at"
-        else:
-            join = ""
-            order = "w.due_at"
-        sql = f"SELECT w.* FROM words w {join} WHERE {where} ORDER BY {order}, w.id"
-        if limit is not None:
-            sql += " LIMIT ?"
-            params.append(limit)
-        rows = self.conn.execute(sql, params).fetchall()
         return [self._row_to_word(r) for r in rows]

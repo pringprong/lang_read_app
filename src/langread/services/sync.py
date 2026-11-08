@@ -152,9 +152,10 @@ class SyncService:
              "definition": w.definition, "list_state": w.list_state,
              "hsk_word_id": w.hsk_word_id, "source": w.source,
              "added_at": w.added_at, "ease": w.ease,
-             "interval_days": w.interval_days, "due_at": w.due_at,
              "reps": w.reps, "lapses": w.lapses,
-             "last_rated_at": w.last_rated_at}
+             "last_rated_at": w.last_rated_at,
+             "first_learned_lesson_id": w.first_learned_lesson_id,
+             "last_seen_lesson_id": w.last_seen_lesson_id}
             for state in ("new", "learned", "basic")
             for w in self.words.list_by_state(state)
         ]

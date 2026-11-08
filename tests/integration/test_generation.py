@@ -99,7 +99,7 @@ def test_fill_template_unknown_placeholder():
 
 def test_generate_lesson_structure(conn, service):
     _conn, topic_id = conn
-    draft = service.generate_lesson(topic_id, NEW, REVIEW, 8)
+    draft = service.generate_lesson(topic_id, NEW, 8)
     assert draft.topic_name == "Cooking"
     assert len(draft.paragraphs) == 8
     # first five paragraphs introduce one new word each
@@ -122,7 +122,7 @@ def test_generate_lesson_structure(conn, service):
 def test_progress_callback_and_usage_feedback(conn, service):
     _conn, topic_id = conn
     seen = []
-    draft = service.generate_lesson(topic_id, NEW, REVIEW, 8,
+    draft = service.generate_lesson(topic_id, NEW, 8,
                                     progress=lambda i, t: seen.append((i, t)))
     assert [i for i, _t in seen] == list(range(8))
     # usage tracking: repeats made later paragraphs reuse words (§6.3)
@@ -139,7 +139,7 @@ def test_retry_when_first_use_missing(conn):
     # call #2 is paragraph 2's first reply: omit its new word; the retry must add it
     llm = ScriptedLlm(omit_new_on_calls={2})
     service = GenerationService(_conn, llm=llm)
-    draft = service.generate_lesson(topic_id, NEW, REVIEW, 8)
+    draft = service.generate_lesson(topic_id, NEW, 8)
     assert NEW[1] in draft.paragraphs[1].used_words
     assert draft.paragraphs[1].retries == 1
 
@@ -148,14 +148,14 @@ def test_missing_llm_raises(conn):
     _conn, topic_id = conn
     service = GenerationService(_conn, llm=None)
     with pytest.raises(GenerationError, match="not configured"):
-        service.generate_lesson(topic_id, NEW, REVIEW, 8)
+        service.generate_lesson(topic_id, NEW, 8)
 
 
 def test_invalid_word_count_wrapped(conn):
     _conn, topic_id = conn
     with pytest.raises(GenerationError, match="5–10"):
         GenerationService(_conn, llm=ScriptedLlm()).generate_lesson(
-            topic_id, NEW[:4], REVIEW, 8
+            topic_id, NEW[:4], 8
         )
 
 
@@ -184,7 +184,7 @@ def test_retry_failure_keeps_earlier_text(conn):
             return "咕复一也很有用。咕复二也很有用。"
 
     service = GenerationService(_conn, llm=FlakyRetryLlm())
-    draft = service.generate_lesson(topic_id, NEW, REVIEW, 8)
+    draft = service.generate_lesson(topic_id, NEW, 8)
     # lesson still completes; paragraph 0 has text (word missing, noted)
     assert len(draft.paragraphs) == 8
     assert draft.paragraphs[0].text
@@ -213,7 +213,7 @@ def test_basic_words_sampled_per_paragraph(conn):
     TemplatesRepo(_conn).upsert("generate_final_paragraph", "FINAL: {all_new_words}")
 
     service = GenerationService(_conn, llm=ScriptedLlm())
-    draft = service.generate_lesson(topic_id, NEW, REVIEW, 8)
+    draft = service.generate_lesson(topic_id, NEW, 8)
 
     samples: list[list[str]] = []
     for call in service.llm.calls:
@@ -250,7 +250,7 @@ def test_basic_words_smaller_than_sample(conn):
     TemplatesRepo(_conn).upsert("generate_final_paragraph", "FINAL: {all_new_words}")
 
     service = GenerationService(_conn, llm=ScriptedLlm())
-    draft = service.generate_lesson(topic_id, NEW, REVIEW, 8)  # pool of 2 basic words
+    draft = service.generate_lesson(topic_id, NEW, 8)  # pool of 2 basic words
     for call in service.llm.calls:
         if call.startswith("FINAL:"):
             continue
@@ -260,3 +260,56 @@ def test_basic_words_smaller_than_sample(conn):
             assert 1 <= len(sample) <= 2
             assert len(set(sample)) == len(sample)
     assert len(draft.paragraphs) == 8
+
+
+def _promote_review_words(conn, topic_id):
+    """Promote REVIEW words to Learned in a prior lesson; returns the words."""
+    from langread.db.repositories import LessonsRepo
+    from langread.services.srs import SrsService
+
+    anchor = LessonsRepo(conn).create(topic_id=topic_id)
+    srs = SrsService(conn)
+    promoted = []
+    for text in REVIEW:
+        word = WordsRepo(conn).get_by_text(text)
+        srs.promote_word(word.id, anchor.id)
+        promoted.append(word)
+    return promoted
+
+
+def test_learned_words_woven_into_paragraphs(conn):
+    """The lesson-frequency SRS suggests learned words per paragraph, the
+    LLM uses them, and the in-lesson cooldown stops re-suggesting a word
+    that already appeared in this lesson."""
+    _conn, topic_id = conn
+    _promote_review_words(_conn, topic_id)
+
+    service = GenerationService(_conn, llm=ScriptedLlm())
+    draft = service.generate_lesson(topic_id, NEW, 6)
+
+    # both learned words suggested and actually used in the first paragraph
+    assert set(draft.paragraphs[0].learned_used) == set(REVIEW)
+    assert set(REVIEW) <= set(draft.review_words)
+    # the first paragraph's prompt actually requested them
+    review_segment = service.llm.calls[0].split("review=")[1].split(";")[0]
+    assert set(REVIEW) <= set(review_segment.split("、"))
+    # cooldown: after appearing, neither is suggested again in this lesson
+    for paragraph in draft.paragraphs[1:]:
+        assert REVIEW[0] not in paragraph.learned_used
+        assert REVIEW[1] not in paragraph.learned_used
+
+
+def test_spontaneous_learned_word_usage_is_detected(conn):
+    """A learned word the LLM uses WITHOUT being suggested still counts as
+    an actual appearance (exposure = real usage, not suggestions)."""
+    _conn, topic_id = conn
+    _promote_review_words(_conn, topic_id)
+
+    class SpontaneousLlm(ScriptedLlm):
+        def chat(self, prompt, temperature=None):
+            return f"{REVIEW[0]}也很有用。" + super().chat(prompt, temperature)
+
+    service = GenerationService(_conn, llm=SpontaneousLlm())
+    draft = service.generate_lesson(topic_id, NEW, 6)
+    # used in EVERY paragraph even though only suggested in the first
+    assert all(REVIEW[0] in p.learned_used for p in draft.paragraphs)

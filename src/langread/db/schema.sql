@@ -58,16 +58,16 @@ CREATE TABLE words (
     added_at      TEXT NOT NULL,
     definition_source TEXT CHECK (definition_source IN
                   ('dictionary', 'llm', 'hsk', 'manual')),  -- v3
-    -- SRS fields, meaningful when list_state = 'learned':
+    -- SRS fields, meaningful when list_state = 'learned' (lesson-frequency
+    -- engine, schema v4: day-based interval/due columns were dropped):
     ease            REAL NOT NULL DEFAULT 2.5,
-    interval_days   REAL,
-    due_at          TEXT,
     reps            INTEGER NOT NULL DEFAULT 0,
     lapses          INTEGER NOT NULL DEFAULT 0,
-    last_rated_at   TEXT
+    last_rated_at   TEXT,
+    first_learned_lesson_id INTEGER REFERENCES lessons(id),
+    last_seen_lesson_id     INTEGER REFERENCES lessons(id)
 );
 CREATE INDEX idx_words_state ON words(list_state, added_at);
-CREATE INDEX idx_words_due ON words(list_state, due_at);
 
 CREATE TABLE word_topics (
     word_id  INTEGER NOT NULL REFERENCES words(id) ON DELETE CASCADE,
@@ -82,6 +82,17 @@ CREATE TABLE lesson_words (
     PRIMARY KEY (lesson_id, word_id)
 );
 CREATE INDEX idx_lesson_words_word ON lesson_words(word_id);
+
+CREATE TABLE word_appearances (
+    -- actual (segmented) appearances of learned words in lesson paragraphs:
+    -- the ground truth the lesson-frequency SRS reads (schema v4)
+    word_id    INTEGER NOT NULL REFERENCES words(id)   ON DELETE CASCADE,
+    lesson_id  INTEGER NOT NULL REFERENCES lessons(id) ON DELETE CASCADE,
+    para_index INTEGER NOT NULL,
+    PRIMARY KEY (word_id, lesson_id, para_index)
+);
+CREATE INDEX idx_word_appearances_word ON word_appearances(word_id);
+CREATE INDEX idx_word_appearances_lesson ON word_appearances(lesson_id, para_index);
 
 CREATE TABLE review_events (
     id          INTEGER PRIMARY KEY,

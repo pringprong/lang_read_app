@@ -1,7 +1,7 @@
 # Lesson-Frequency-Based SRS Update — Plan
 
 Date: 2026-11-08
-Status: FINAL — clarification answers (§9) incorporated; ready to implement.
+Status: IMPLEMENTED (2026-11-08) — all tests passing (256 tests).
 
 ## 1. Goal
 

@@ -30,6 +30,13 @@ def topics(conn):
     return TopicsRepo(conn)
 
 
+@pytest.fixture()
+def lessons(conn):
+    from langread.db.repositories import LessonsRepo
+
+    return LessonsRepo(conn)
+
+
 # ---- words ----
 
 
@@ -70,12 +77,51 @@ def test_set_translation_and_srs(words):
     w, _ = words.get_or_create("厨房")
     words.set_translation(w.id, "chúfáng", "kitchen")
     words.set_srs(
-        w.id, ease=2.8, interval_days=4.0, due_at="2026-11-05T00:00:00+00:00",
-        reps=2, lapses=1, last_rated_at="2026-11-01T00:00:00+00:00",
+        w.id, ease=2.8, reps=2, lapses=1,
+        last_rated_at="2026-11-01T00:00:00+00:00",
     )
     got = words.get(w.id)
     assert (got.pinyin, got.definition) == ("chúfáng", "kitchen")
-    assert (got.ease, got.interval_days, got.reps, got.lapses) == (2.8, 4.0, 2, 1)
+    assert (got.ease, got.reps, got.lapses) == (2.8, 2, 1)
+
+
+def test_lesson_track_set_clear_and_forward_only(words, topics, lessons):
+    cooking = topics.create("Cooking")
+    lesson1 = lessons.create(topic_id=cooking.id)
+    lesson2 = lessons.create(topic_id=cooking.id)
+    w, _ = words.get_or_create("厨房")
+    words.set_lesson_track(w.id, first_learned_lesson_id=lesson1.id,
+                           last_seen_lesson_id=lesson1.id)
+    got = words.get(w.id)
+    assert (got.first_learned_lesson_id, got.last_seen_lesson_id) == (
+        lesson1.id, lesson1.id
+    )
+
+    # an actual appearance only ever moves last_seen FORWARD
+    words.set_last_seen_lesson(w.id, lesson2.id)
+    assert words.get(w.id).last_seen_lesson_id == lesson2.id
+    words.set_last_seen_lesson(w.id, lesson1.id)  # stale replay (resume) — ignored
+    assert words.get(w.id).last_seen_lesson_id == lesson2.id
+
+    words.clear_lesson_track(w.id)  # lesson delete → word demoted
+    got = words.get(w.id)
+    assert (got.first_learned_lesson_id, got.last_seen_lesson_id) == (None, None)
+
+
+def test_learned_word_lesson_tracking_query(words, topics, lessons):
+    cooking = topics.create("Cooking")
+    anchor = lessons.create(topic_id=cooking.id)  # lesson 1: where 甲 was learned
+    w, _ = words.get_or_create("甲")
+    words.move_to_state(w.id, "learned")
+    words.set_lesson_track(w.id, first_learned_lesson_id=anchor.id,
+                           last_seen_lesson_id=anchor.id)
+    lesson = lessons.create(topic_id=cooking.id)  # lesson 2: reuses 甲
+    lessons.add_appearance(lesson.id, w.id, para_index=3)
+    assert lessons.appearances_for_lesson(lesson.id) == [(w.id, 3)]
+    words.set_last_seen_lesson(w.id, lesson.id)
+    tracked = {x.text: x for x in words.list_by_state("learned")}
+    assert tracked["甲"].first_learned_lesson_id == anchor.id
+    assert tracked["甲"].last_seen_lesson_id == lesson.id
 
 
 def test_word_topic_association(words, topics):
@@ -99,38 +145,6 @@ def test_suggest_new_words_topic_first_oldest_first(words, topics):
     suggested = words.suggest_new_words(cooking.id, limit=10)
     assert suggested[0].text == "机场"  # topic words first
     assert [w.text for w in suggested[1:]] == ["一", "二", "三"]  # oldest first
-
-
-def test_due_learned_words_topic_first_and_ordering(words, topics):
-    cooking = topics.create("Cooking")
-
-    def learned(text, due_day, topic_id=None):
-        w, _ = words.get_or_create(text)
-        words.move_to_state(w.id, "learned")
-        words.set_srs(
-            w.id, ease=2.5, interval_days=1.0,
-            due_at=f"2026-11-{due_day:02d}T00:00:00+00:00",
-            reps=1, lapses=0, last_rated_at=None,
-        )
-        if topic_id:
-            words.associate_topic(w.id, topic_id)
-        return w
-
-    learned("甲", 5)              # due Nov 5, no topic
-    learned("乙", 3, cooking.id)  # due Nov 3, Cooking
-    learned("丙", 1)              # due Nov 1, no topic
-
-    by_topic = words.due_learned_words(topic_id=cooking.id)
-    # topic words first, then others by due date (reqs §7.2: "mainly same topic")
-    assert [w.text for w in by_topic] == ["乙", "丙", "甲"]
-    # with a limit, the topic word is suggested first
-    assert [w.text for w in words.due_learned_words(topic_id=cooking.id, limit=1)] == ["乙"]
-
-    all_due = words.due_learned_words()
-    assert [w.text for w in all_due] == ["丙", "乙", "甲"]  # global due order
-
-    only_due_now = words.due_learned_words(now_iso="2026-11-02T00:00:00+00:00")
-    assert [w.text for w in only_due_now] == ["丙"]
 
 
 # ---- HSK ----

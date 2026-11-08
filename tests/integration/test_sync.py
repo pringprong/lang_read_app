@@ -34,9 +34,10 @@ def env(tmp_path, monkeypatch):
     srs = SrsService(conn)
     for text in NEW:
         words.get_or_create(text, list_state="new", source="manual")
+    anchor = LessonsRepo(conn).create(topic_id=topic.id)  # prior lesson
     for text in REVIEW:
         word, _ = words.get_or_create(text, list_state="new", source="manual")
-        srs.promote_word(word.id, now="2026-11-01T00:00:00+00:00")
+        srs.promote_word(word.id, anchor.id)
     paragraphs = [
         GeneratedParagraph(index=i, text=f"我们学{NEW[i]}。",
                            sentences=[f"我们学{NEW[i]}。"],
@@ -67,7 +68,7 @@ def _sync(env) -> SyncService:
 
 def test_export_creates_verified_bundle_with_audio(env):
     stats = _sync(env).export_bundle(env["tmp_path"] / "sync.zip")
-    assert stats.lessons == 1
+    assert stats.lessons == 2  # anchor + the saved lesson
     assert stats.audio_files == 1
     assert stats.words == len(NEW) + len(REVIEW)
 
@@ -80,7 +81,7 @@ def test_export_creates_verified_bundle_with_audio(env):
 
     manifest = SyncService.verify_bundle(stats.path)
     assert manifest["bundle_type"] == "content"
-    assert manifest["counts"]["lessons"] == 1
+    assert manifest["counts"]["lessons"] == 2
     with zipfile.ZipFile(stats.path) as zf:
         content = json.loads(zf.read("content.json"))
     assert content["topics"][0]["name"] == "Cooking"
@@ -150,7 +151,7 @@ def test_import_results_applies_android_reviews(env):
     srs = SrsService(conn)
     word_a = words.get_by_text(NEW[0])       # learned
     word_b = words.get_by_text(NEW[1])       # learned
-    word_b_interval_before = word_b.interval_days
+    word_b_ease_before = word_b.ease
 
     t_rating_a, t_rating_b = _ts(3600), _ts(3601)
     t_lesson, t_action = _ts(3602), _ts(3603)
@@ -176,10 +177,10 @@ def test_import_results_applies_android_reviews(env):
     assert len(android) == 3  # two ratings + one lesson_reviewed
     # difficult applied with the android timestamp
     word_a_after = words.get_by_text(NEW[0])
-    assert word_a_after.interval_days == 0.5
+    assert word_a_after.ease == pytest.approx(2.3)  # 2.5 − 0.20
     assert word_a_after.last_rated_at == t_rating_a
     # "unchanged" leaves the SRS state alone
-    assert words.get_by_text(NEW[1]).interval_days == word_b_interval_before
+    assert words.get_by_text(NEW[1]).ease == word_b_ease_before
     # lesson marked reviewed with the android timestamp
     lesson = LessonsRepo(conn).get(env["lesson_id"])
     assert lesson.last_reviewed_at == t_lesson
@@ -197,7 +198,7 @@ def test_import_most_recent_wins(env):
     word = words.get_by_text(NEW[0])
     # desktop rating is NEWER than the android event → android rating skipped
     srs.rate_word(word.id, "easy", env["lesson_id"], now=_ts(7200))
-    interval_after_desktop = words.get_by_text(word.text).interval_days
+    ease_after_desktop = words.get_by_text(word.text).ease
 
     records = [
         {"type": "rating", "lesson_id": env["lesson_id"], "word_id": word.id,
@@ -208,7 +209,7 @@ def test_import_most_recent_wins(env):
 
     assert stats.ratings_applied == 0
     assert stats.ratings_skipped == 1
-    assert words.get_by_text(word.text).interval_days == interval_after_desktop
+    assert words.get_by_text(word.text).ease == ease_after_desktop
     # the android event is still recorded in the log even though skipped
     android = [e for e in srs.reviews.events_for_lesson(env["lesson_id"])
                if e.device == "android"]
@@ -235,11 +236,11 @@ def test_import_corrupt_bundle_rejected_before_any_changes(env):
             dst.writestr(name, data)
 
     lesson_before = LessonsRepo(conn).get(env["lesson_id"]).last_reviewed_at
-    interval_before = word.interval_days
+    ease_before = word.ease
     with pytest.raises(SyncError):
         _sync(env).import_results(env["tmp_path"] / "bad.zip")
     # nothing applied, no backup created
-    assert words.get_by_text(NEW[0]).interval_days == interval_before
+    assert words.get_by_text(NEW[0]).ease == ease_before
     assert LessonsRepo(conn).get(env["lesson_id"]).last_reviewed_at == lesson_before
     assert not list(env["backups_dir"].glob("pre-import-*.db"))
 

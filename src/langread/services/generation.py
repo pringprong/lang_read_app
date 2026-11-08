@@ -1,11 +1,13 @@
 """Lesson text generation pipeline (requirements §7.3–7.7, D-12).
 
 Generates a lesson one paragraph at a time: builds each prompt from the
-editable template + the cadence planner's word list plus a random sample of
-20 Basic words (different for each paragraph), calls the sentence generation
-model, splits the reply into sentences, segments them, checks which
-requested words were actually used, retries when the first-use word is
-missing, and feeds usage back into the planner for the next paragraph.
+editable template + the cadence planner's word list + a random sample of
+20 Basic words (different for each paragraph) + a few Learned words picked
+by the lesson-frequency SRS selector, calls the sentence generation model,
+splits the reply into sentences, segments them, checks which requested
+words were actually used (including any spontaneous Learned-word usage),
+retries when the first-use word is missing, and feeds usage back into the
+planner and the SRS selector for the next paragraph.
 """
 
 from __future__ import annotations
@@ -20,6 +22,7 @@ from langread.db.repositories import TemplatesRepo, TopicsRepo, WordsRepo
 from langread.services.cadence import CadenceError, CadencePlanner
 from langread.services.llm_client import LlmError
 from langread.services.segmentation import SegmentationService
+from langread.services.srs import SrsService
 
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[。！？!?；;])")
 _LEFTOVER_PLACEHOLDER_RE = re.compile(r"\{[a-z_]+\}")
@@ -67,6 +70,9 @@ class GeneratedParagraph:
     sentences: list[str] = field(default_factory=list)
     segmentations: list[list[str]] = field(default_factory=list)
     used_words: list[str] = field(default_factory=list)
+    # Learned-list words that ACTUALLY appear in this paragraph's tokens,
+    # whether suggested by the SRS selector or used spontaneously by the LLM
+    learned_used: list[str] = field(default_factory=list)
     retries: int = 0
 
 
@@ -94,22 +100,28 @@ class GenerationService:
         self.topics = TopicsRepo(conn)
         self.words = WordsRepo(conn)
         self.segmentation = SegmentationService(conn)
+        self.srs = SrsService(conn)
+        self._learned_texts: set[str] = set()
 
     # ---- suggestions (§7.2) ----
 
     def suggest_lesson_words(self, topic_id: int | None,
                              n_new: int = 10, n_review: int = 6
                              ) -> tuple[list[str], list[str]]:
-        """Suggested new words (D-11) and review words (SRS due, §7.2)."""
+        """Suggested new words (D-11) and the highest-weight learned words.
+
+        The learned words are informational only: per-paragraph selection
+        during generation is automatic (lesson-frequency SRS)."""
         new_words = [w.text for w in self.words.suggest_new_words(topic_id, n_new)]
-        review_words = [w.text for w in self.words.due_learned_words(topic_id, n_review)]
+        review_words = self.srs.selector().top_weighted(n_review)
         return new_words, review_words
 
     # ---- generation ----
 
     def generate_lesson(self, topic_id: int, new_words: list[str],
-                        review_words: list[str], n_paragraphs: int,
-                        progress: Callable[[int, str], None] | None = None
+                        n_paragraphs: int,
+                        progress: Callable[[int, str], None] | None = None,
+                        rng: random.Random | None = None
                         ) -> LessonDraft:
         if self.llm is None:
             raise GenerationError(
@@ -120,18 +132,32 @@ class GenerationService:
         if topic is None:
             raise GenerationError(f"topic {topic_id} does not exist")
         try:
-            planner = CadencePlanner(new_words, review_words, n_paragraphs)
+            planner = CadencePlanner(new_words, n_paragraphs)
         except CadenceError as exc:
             raise GenerationError(str(exc)) from exc
 
         basic_samples = self._basic_word_samples(n_paragraphs)
+        # the lesson-frequency SRS picks a few Learned words per paragraph;
+        # current_lesson_no = MAX(lessons.id) + 1 (the lesson being generated)
+        learned_selector = self.srs.selector(rng=rng)
+        self._learned_texts = {
+            w.text for w in self.words.list_by_state("learned")
+        }
+        suggested_review: set[str] = set()
         paragraphs: list[GeneratedParagraph] = []
         for index in range(n_paragraphs):
-            plan = planner.plan_paragraph(index)
+            review_words = learned_selector.pick(paragraph_index=index)
+            suggested_review.update(review_words)
+            plan = planner.plan_paragraph(index, review_words)
             paragraph = self._generate_paragraph(
                 plan, topic.name, basic_samples[index]
             )
             planner.record_usage(paragraph.used_words)
+            # only real appearances count as exposure (the LLM may skip
+            # suggestions) — fed back for the in-lesson cooldown
+            learned_selector.record_usage(
+                paragraph.learned_used, paragraph_index=index
+            )
             paragraphs.append(paragraph)
             if progress is not None:
                 progress(index, paragraph.text)
@@ -140,7 +166,7 @@ class GenerationService:
             topic_id=topic_id,
             topic_name=topic.name,
             new_words=list(new_words),
-            review_words=list(review_words),
+            review_words=sorted(suggested_review),
             paragraphs=paragraphs,
         )
 
@@ -211,12 +237,17 @@ class GenerationService:
         text, used, retries = self._chat_until_valid(prompt, plan.first_use, requested)
         sentences = split_sentences(text)
         segmentations = [self.segmentation.token_texts(s) for s in sentences]
+        tokens = {token for seg in segmentations for token in seg}
+        # learned words ACTUALLY appearing in this paragraph — suggested or
+        # spontaneous; this is the exposure signal for the lesson SRS
+        learned_used = sorted(tokens & self._learned_texts)
         return GeneratedParagraph(
             index=plan.index,
             text=text,
             sentences=sentences,
             segmentations=segmentations,
             used_words=sorted(used),
+            learned_used=learned_used,
             retries=retries,
         )
 

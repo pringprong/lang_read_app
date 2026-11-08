@@ -3,11 +3,16 @@
 Steps (each idempotent, so an interrupted save can be resumed by re-running
 `finalize_lesson` on the incomplete lesson):
   A. create the lesson row (status='incomplete'), sentences, lesson_words
+     (new words; review roles are derived from actual appearances in step D)
   B. whole-sentence translations (skipped if the translation model is not
      configured — sentences keep NULL translations)
   C. word promotion: new words gain pinyin/definition (translation model,
-     pypinyin fallback), move New→Learned with an initial SRS state
-  D. SRS exposure updates for the review words
+     pypinyin fallback), move New→Learned with an initial SRS state and
+     lesson tracking
+  D. appearance recording: which learned words actually appear in which
+     paragraph (from the FINAL, possibly hand-edited, sentence segmentations)
+     — word_appearances rows, lesson_words(role='review'), and
+     last_seen_lesson_id updates (the lesson-frequency SRS exposure)
   E. one MP3 for the whole lesson (one TTS call per sentence, concatenated;
      Kokoro's speaking pace rises with the length of a single request, so
      whole-paragraph requests made long paragraphs play noticeably faster)
@@ -80,10 +85,8 @@ class LessonSaver:
                 self._link_hsk(word)
             self.lessons.add_lesson_word(lesson.id, word.id, "new")
             self.words.associate_topic(word.id, draft.topic_id)
-        for text in draft.review_words:
-            word = self.words.get_by_text(text)
-            if word is not None:
-                self.lessons.add_lesson_word(lesson.id, word.id, "review")
+        # review roles are NOT taken from the draft: they are derived from the
+        # words that actually appear in the lesson text (step D)
 
         return self.finalize_lesson(lesson.id, progress=progress)
 
@@ -106,7 +109,7 @@ class LessonSaver:
 
         self._translate_sentences(lesson_id, progress)
         self._promote_new_words(lesson_id, progress)
-        self._apply_exposure(lesson_id, progress)
+        self._record_appearances(lesson_id, progress)
         self._generate_audio(lesson_id, progress)
         self.lessons.set_status(lesson_id, "complete")
         result = self.lessons.get(lesson_id)
@@ -178,7 +181,7 @@ class LessonSaver:
                         else source
                     ),
                 )
-            self.srs.promote_word(word_id)  # New → Learned + initial SRS (§7.9.3)
+            self.srs.promote_word(word_id, lesson_id)  # New → Learned (§7.9.3)
 
     def _word_translation(
         self, word: str
@@ -197,14 +200,41 @@ class LessonSaver:
                 return pinyin, definition, "llm"
         return pinyin_fallback(word), None, None  # offline fallback (pypinyin)
 
-    def _apply_exposure(self, lesson_id: int, progress: ProgressFn | None) -> None:
-        rows = [r for r in self.lessons.lesson_words(lesson_id) if r[2] == "review"]
-        for i, (_lid, word_id, _role) in enumerate(rows):
+    def _record_appearances(self, lesson_id: int,
+                            progress: ProgressFn | None) -> None:
+        """Record the learned words that ACTUALLY appear in each paragraph.
+
+        Runs on the FINAL sentence segmentations (after any hand edits in
+        wizard step 3), so a word the user deleted is not an exposure and a
+        word the user typed in is one. For every appearing learned word:
+        - insert a `word_appearances` row (word, lesson, paragraph)
+        - add a `lesson_words(role='review')` row (unless already role='new')
+        - advance `last_seen_lesson_id` (forward-only, so resume is safe)
+
+        No review event is written: an appearance is not a review.
+        """
+        learned_by_text = {
+            w.text: w
+            for w in self.words.list_by_state("learned")
+        }
+        paragraphs: dict[int, set[str]] = {}
+        for sentence in self.sentences.list_for_lesson(lesson_id):
+            paragraphs.setdefault(sentence.para_index, set()).update(
+                sentence.segmentation
+            )
+        appearing: set[int] = set()
+        for para_index, tokens in sorted(paragraphs.items()):
+            for text in sorted(tokens):
+                word = learned_by_text.get(text)
+                if word is None:
+                    continue
+                self.lessons.add_appearance(lesson_id, word.id, para_index)
+                self.lessons.add_lesson_word(lesson_id, word.id, "review")
+                appearing.add(word.id)
+        for i, word_id in enumerate(sorted(appearing)):
             if progress:
-                progress("SRS updates", i + 1, len(rows))
-            word = self.words.get(word_id)
-            if word is not None and word.list_state == "learned":
-                self.srs.apply_exposure(word_id)  # §7.9.4
+                progress("SRS updates", i + 1, len(appearing))
+            self.words.set_last_seen_lesson(word_id, lesson_id)
 
     def _generate_audio(self, lesson_id: int, progress: ProgressFn | None) -> None:
         if self.tts is None:
@@ -288,6 +318,14 @@ class LessonSaver:
                 "lessons may reuse this lesson's words"
             )
         demoted: list[str] = []
+        # words whose appearance history includes this lesson (their
+        # last_seen_lesson_id must be repaired after the delete)
+        affected = [
+            row[0] for row in self.conn.execute(
+                "SELECT DISTINCT word_id FROM word_appearances WHERE lesson_id = ?",
+                (lesson_id,),
+            )
+        ]
         for _lid, word_id, role in self.lessons.lesson_words(lesson_id):
             if role != "new":
                 continue  # review words existed before this lesson
@@ -295,12 +333,30 @@ class LessonSaver:
             if word is None or word.list_state != "learned":
                 continue  # never promoted (incomplete) or moved elsewhere
             self.words.move_to_state(word_id, "new")
+            # reset the lesson-frequency tracking so a later re-promotion
+            # starts fresh (appearances cascade-deleted with the lesson)
+            self.words.clear_lesson_track(word_id)
             demoted.append(word.text)
+        # NULL out word references to this lesson so the foreign keys allow
+        # the delete (the appearance rows themselves cascade)
+        self.words.reset_lesson_references(lesson_id)
         for suffix in (".mp3", ".wav", ".ogg", ".flac"):
             candidate = self._audio_dir / f"lesson_{lesson_id}{suffix}"
             if candidate.exists():
                 candidate.unlink()
         self.lessons.delete(lesson_id)
+        # repair last_seen: the previous lesson the word actually appeared in
+        for word_id in affected:
+            word = self.words.get(word_id)
+            if word is None or word.list_state != "learned":
+                continue  # demoted above, or moved elsewhere
+            row = self.conn.execute(
+                "SELECT MAX(lesson_id) FROM word_appearances WHERE word_id = ?",
+                (word_id,),
+            ).fetchone()
+            if row and row[0] is not None:
+                self.words.set_lesson_track(word_id,
+                                            last_seen_lesson_id=int(row[0]))
         return demoted
 
     def _sentence_texts(self, lesson_id: int) -> list[list[str]]:

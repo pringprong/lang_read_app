@@ -162,14 +162,17 @@ def test_templates_page_edit_and_save(qapp, conn):
 
 def test_srs_page_roundtrip(qapp, conn):
     page = SrsPage(conn)
-    page._spinners["initial_interval_days"].setValue(3.0)
-    page._spinners["easy_bonus"].setValue(1.6)
+    page._spinners["staleness_target_lessons"].setValue(12.0)
+    page._spinners["weight_staleness"].setValue(0.6)
+    page._spinners["learned_words_per_paragraph"].setValue(3)
     page._save()
 
     params = SrsService(conn).params()
-    assert params.initial_interval_days == 3.0
-    assert params.easy_bonus == 1.6
+    assert params.staleness_target_lessons == 12.0
+    assert params.weight_staleness == 0.6
+    assert params.learned_words_per_paragraph == 3
 
     page2 = SrsPage(conn)
-    assert page2._spinners["initial_interval_days"].value() == 3.0
-    assert page2._spinners["easy_bonus"].value() == 1.6
+    assert page2._spinners["staleness_target_lessons"].value() == 12.0
+    assert page2._spinners["weight_staleness"].value() == 0.6
+    assert page2._spinners["learned_words_per_paragraph"].value() == 3

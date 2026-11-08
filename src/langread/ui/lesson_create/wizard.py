@@ -102,7 +102,6 @@ class LessonWizard(QDialog):
         self.next_button.setText("Generate lesson")
         self.generate_page.start(
             self.word_page.selected_new(),
-            self.word_page.selected_review(),
             self.word_page.paragraph_count(),
         )
 

@@ -32,7 +32,7 @@ from langread.services.hsk import HskService
 from langread.services.word_import import WordImportService
 
 _LIST_COLUMNS = ["Word", "Pinyin", "Definition", "Added"]
-LEARNED_COLUMNS = ["Word", "Pinyin", "Definition", "Due", "Ease", "Reps"]
+LEARNED_COLUMNS = ["Word", "Pinyin", "Definition", "Last lesson", "Ease", "Reps"]
 _HSK_COLUMNS = ["Word", "Pinyin", "Definition", "Level", "In app"]
 
 
@@ -73,7 +73,11 @@ class _ListTab(QWidget):
             self.table.setItem(row, 1, QTableWidgetItem(word.pinyin or ""))
             self.table.setItem(row, 2, QTableWidgetItem(word.definition or ""))
             if self.is_learned:
-                self.table.setItem(row, 3, QTableWidgetItem(word.due_at or ""))
+                last_lesson = (
+                    str(word.last_seen_lesson_id)
+                    if word.last_seen_lesson_id is not None else ""
+                )
+                self.table.setItem(row, 3, QTableWidgetItem(last_lesson))
                 self.table.setItem(row, 4, QTableWidgetItem(f"{word.ease:.2f}"))
                 self.table.setItem(row, 5, QTableWidgetItem(str(word.reps)))
             else:
